@@ -1,0 +1,12 @@
+{
+    "token": "",
+    "repairClient": "示例维修网点",
+    "linkman": "张三",
+    "linknumber": "13800138000",
+    "rebackFault": "其他",
+    "rebackFaulttext": "设备异常，客户要求换新",
+    "dealType": "2",
+    "repairMode": "2",
+    "delay": "500",
+    "skip": true
+}
