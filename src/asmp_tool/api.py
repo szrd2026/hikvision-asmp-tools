@@ -23,6 +23,7 @@ class BusinessRejected(UserError):
 class ApiClient:
     ENDPOINTS = {
         ("POST", "/base/getLoginInfo"), ("GET", "/base/getConfigList"),
+        ("GET", "/base/getProvinceCityArea"),
         ("POST", "/rmaManage/getRmaDetailBySerial"), ("POST", "/rmaManage/setNewRma"),
     }
 
@@ -86,6 +87,22 @@ class ApiClient:
         if not isinstance(data, dict) or not data.get("productModel"):
             raise BusinessRejected("未查到有效产品资料，请核对序列号")
         return data
+
+    def regions(self, level: str, parent_code: str = "") -> list[dict[str, str]]:
+        if level not in {"province", "city", "district"} or level != "province" and not parent_code:
+            raise UserError("请先选择上级行政区域")
+        data = self.request("GET", "/base/getProvinceCityArea", params={
+            "locationType": level, "parentCode": parent_code, "keyword": "",
+        }).get("data")
+        if not isinstance(data, list):
+            raise UserError("省市区资料格式异常，请重新加载")
+        options = []
+        for item in data:
+            if (not isinstance(item, dict) or not isinstance(item.get("locationName"), str)
+                    or not item["locationName"].strip() or not item.get("locationCode")):
+                raise UserError("省市区资料不完整，请重新加载")
+            options.append({"name": item["locationName"], "code": str(item["locationCode"])})
+        return options
 
     def submit(self, payload: dict) -> str:
         data = self.request("POST", "/rmaManage/setNewRma", data=payload).get("data")

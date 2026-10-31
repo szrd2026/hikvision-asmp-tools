@@ -6,6 +6,11 @@
     "rebackFaulttext": "",
     "dealType": "2",
     "repairMode": "2",
+    "isSend": "1",
+    "province": "",
+    "city": "",
+    "area": "",
+    "address": "",
     "delay": 500,
     "skip": true
 }

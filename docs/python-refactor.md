@@ -1,8 +1,8 @@
-# Python 2.0 架构与提交状态
+# Python 2.x 架构与提交状态
 
 ## 重构范围
 
-2.0 重写界面、网页登录、HTTP、配置、批量任务和提交记录。原设置范围、网页固定字段及每个序列号一份登记的行为保持不变。旧 Windows 实现归档在 `legacy/powershell/`，新运行包不依赖它。
+2.0 重写界面、网页登录、HTTP、配置、批量任务和提交记录。2.1 增加返回方式、寄回客户地址、设置自动保存和故障描述历史。每个序列号创建一份登记。旧 Windows 实现归档在 `legacy/powershell/`，新运行包不依赖它。
 
 ## 数据流
 
@@ -29,6 +29,8 @@ flowchart LR
 
 报文由 `models.py` 根据查询资料及原有设置生成。服务端返回的型号、保修、客户、物料、附件和质检字段被保留。提交前验证 SR02 权限、网点能力、必填字段及一年包换条件。
 
+返回方式在表头及每条明细均使用整数 `isSend`：`1` 寄回送修点、`0` 寄回客户。寄回客户需要省、市、区名称及详细地址，区域代码仅用于级联查询。只读 `GET /base/getProvinceCityArea` 使用 `locationType=province/city/district`、`parentCode` 和空 `keyword`；响应的 `locationCode` 用于查下级，`locationName` 写入表单。映射核对自 [官网收货登记脚本](https://asmp.hikvision.com/sr/static/js/chunk-47626014.ca447c69.js) 及 [主脚本](https://asmp.hikvision.com/sr/static/js/app.6bacefba.js)，核对日期 2026-10-31。
+
 ## 持久提交状态
 
 SQLite 使用 WAL 和 FULL synchronous。`reserve()` 在 `BEGIN IMMEDIATE` 事务内重新检查重复记录并写入 pending，事务提交完成后才发送登记。终态更新独立提交；进程中断或结果写入失败后，先前意图依然保留。
@@ -54,6 +56,10 @@ SQLite 使用 WAL 和 FULL synchronous。`reserve()` 在 `BEGIN IMMEDIATE` 事�
 ## 配置与迁移
 
 配置使用 UTF-8、同目录临时文件、fsync 和原子替换。旧 token 只进入本次内存会话，不写入新配置。
+
+表单修改通过 600 ms 单次定时器合并保存；任务开始及正常关闭时刷新尚未保存的修改。未完成的必填信息允许暂存，正式登记仍执行完整校验。保存失败显示提示，关闭保存失败时保留窗口，避免悄悄丢失修改。
+
+schema 2 在 `attempts` 增加 `fault_text`，另用 `fault_descriptions` 保存描述、成功次数及最近使用时间。描述在 `reserve()` 写入，转为成功时在同一事务更新频次；人工核对使用相同路径，每条成功只计一次。失败时事务回滚，提交意图仍保留以防重试。删除历史项不改动提交记录，也不会在重启时从旧记录自动重新生成。schema 1 自动升级，但不虚构旧描述或使用次数。
 
 旧 CSV 以意图/结果行配对迁移，记录来源及已迁移行摘要，仅允许增量追加。表头、截断行、未知状态或已导入内容改写都会停止并回滚迁移。早期 1.x 把超时也记作失败，缺少明确拒绝依据的失败按 unknown 保留；早期导入器留下的同类状态也会修正。
 

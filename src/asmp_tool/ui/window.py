@@ -4,12 +4,12 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QThread, Qt, QUrl, Slot
+from PySide6.QtCore import QSignalBlocker, QThread, QTimer, Qt, QUrl, Slot
 from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QGridLayout, QGroupBox,
-    QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMainWindow,
-    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QSpinBox, QSplitter,
+    QAbstractItemView, QCheckBox, QComboBox, QCompleter, QFileDialog, QGridLayout, QGroupBox,
+    QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLayout, QLineEdit, QMainWindow,
+    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QSplitter,
     QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -18,7 +18,7 @@ from ..api import ApiClient, AuthenticationExpired
 from ..config import ConfigStore, atomic_json
 from ..engine import BatchEngine, ItemResult, Summary
 from ..journal import Journal, STATE_LABELS
-from ..models import DEAL_OPTIONS, FAULT_OPTIONS, REPAIR_OPTIONS, Settings, UserError, display_time, parse_serials, validate_token
+from ..models import DEAL_OPTIONS, FAULT_OPTIONS, REPAIR_OPTIONS, RETURN_OPTIONS, Settings, UserError, display_time, parse_serials, validate_token
 from .login import LoginDialog
 from .worker import TaskWorker
 
@@ -65,6 +65,12 @@ class MainWindow(QMainWindow):
         self._secrets: set[str] = set()
         self._rows: dict[str, int] = {}
         self._history = []
+        self._description_history = set()
+        self._saved_settings = settings if config.path.exists() else None
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(600)
+        self._save_timer.timeout.connect(self._autosave_settings)
         self.last_error = ""
         self.last_summary = None
         self.log_directory = config.directory / "logs"
@@ -72,12 +78,15 @@ class MainWindow(QMainWindow):
         self.log_path = self.log_directory / ("app_" + datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid4().hex[:6] + ".log")
         self.setWindowTitle(f"海康 ASMP 批量登记工具 · {__version__}")
         self.resize(1220, 900)
-        self.setMinimumSize(1020, 760)
+        # Let Qt derive the minimum height when the return-address rows expand.
+        self.setMinimumWidth(1020)
         self.setStyleSheet(STYLE)
         self._build_ui(settings)
         self.token_edit.setText(token)
         self._remember_token(token)
         self.refresh_history()
+        self.refresh_descriptions()
+        self._connect_autosave()
         self.log("就绪。先登录，再查询资料或提交登记。")
 
     def _build_ui(self, settings):
@@ -115,6 +124,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(login_group)
 
         self.settings_group = QGroupBox("登记设置")
+        self.settings_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         grid = QGridLayout(self.settings_group)
         self.client_edit = QLineEdit(settings.repair_client)
         self.contact_edit = QLineEdit(settings.linkman)
@@ -123,15 +133,37 @@ class MainWindow(QMainWindow):
         self.fault_combo.setEditable(True)
         self.fault_combo.addItems(FAULT_OPTIONS)
         self.fault_combo.setCurrentText(settings.reback_fault)
-        self.description_edit = QLineEdit(settings.fault_text)
+        self.description_combo = QComboBox()
+        self.description_combo.setEditable(True)
+        self.description_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.description_combo.setMaxVisibleItems(12)
+        self.description_combo.setMinimumContentsLength(15)
+        self.description_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.description_combo.setEditText(settings.fault_text)
+        self.description_edit = self.description_combo.lineEdit()
+        self.description_edit.setMaxLength(4000)
+        self.description_edit.setPlaceholderText("输入描述或选择历史，按成功登记次数排序")
+        self.description_combo.completer().setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.description_combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+        self.delete_description_button = QPushButton("删除历史")
+        self.delete_description_button.setToolTip("从历史下拉框删除当前描述；保留当前输入和登记记录")
+        self.delete_description_button.clicked.connect(self.delete_description)
+        self.description_combo.currentTextChanged.connect(self._update_description_delete)
+        description_row = QHBoxLayout()
+        description_row.addWidget(self.description_combo, 1)
+        description_row.addWidget(self.delete_description_button)
         self.deal_combo = QComboBox()
         self.repair_combo = QComboBox()
+        self.return_combo = QComboBox()
         for code, label in DEAL_OPTIONS.items():
             self.deal_combo.addItem(label, code)
         for code, label in REPAIR_OPTIONS.items():
             self.repair_combo.addItem(label, code)
+        for code, label in RETURN_OPTIONS.items():
+            self.return_combo.addItem(label, code)
         self.deal_combo.setCurrentIndex(self.deal_combo.findData(settings.deal_type))
         self.repair_combo.setCurrentIndex(self.repair_combo.findData(settings.repair_mode))
+        self.return_combo.setCurrentIndex(self.return_combo.findData(settings.return_mode))
         self.delay_spin = QSpinBox()
         self.delay_spin.setRange(0, 600000)
         self.delay_spin.setSuffix(" 毫秒")
@@ -141,13 +173,52 @@ class MainWindow(QMainWindow):
         fields = [("送修客户", self.client_edit, 0, 0), ("联系人", self.contact_edit, 0, 2),
                   ("联系电话", self.phone_edit, 0, 4), ("客户反馈故障", self.fault_combo, 1, 0),
                   ("处理方式", self.deal_combo, 2, 0), ("接修方式", self.repair_combo, 2, 2),
-                  ("请求间隔", self.delay_spin, 2, 4)]
+                  ("返回方式 *", self.return_combo, 2, 4)]
         for label, widget, row, column in fields:
             grid.addWidget(QLabel(label), row, column)
             grid.addWidget(widget, row, column + 1)
         grid.addWidget(QLabel("故障描述"), 1, 2)
-        grid.addWidget(self.description_edit, 1, 3, 1, 3)
-        grid.addWidget(self.skip_checkbox, 3, 0, 1, 6)
+        grid.addLayout(description_row, 1, 3, 1, 3)
+        self.return_address_panel = QWidget()
+        self.return_address_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        address_grid = QGridLayout(self.return_address_panel)
+        address_grid.setContentsMargins(0, 0, 0, 0)
+        address_grid.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        self.province_combo, self.city_combo, self.area_combo = QComboBox(), QComboBox(), QComboBox()
+        for column, (label, combo, value) in enumerate([
+            ("省份 *", self.province_combo, settings.province),
+            ("城市 *", self.city_combo, settings.city), ("区域 *", self.area_combo, settings.area),
+        ]):
+            combo.setPlaceholderText("请选择")
+            if value:
+                combo.addItem(value)
+                combo.setCurrentIndex(0)
+            combo.setMinimumContentsLength(8)
+            combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            address_grid.addWidget(QLabel(label), 0, column * 2)
+            address_grid.addWidget(combo, 0, column * 2 + 1)
+            address_grid.setColumnStretch(column * 2 + 1, 1)
+        self.address_edit = QLineEdit(settings.address)
+        self.address_edit.setPlaceholderText("寄回客户时必填；请先登录并加载省市区")
+        self.region_button = QPushButton("加载省市区")
+        self.region_button.clicked.connect(lambda: self.load_regions())
+        address_grid.addWidget(QLabel("详细地址 *"), 1, 0)
+        address_grid.addWidget(self.address_edit, 1, 1, 1, 4)
+        address_grid.addWidget(self.region_button, 1, 5)
+        grid.addWidget(self.return_address_panel, 3, 0, 1, 6)
+        self.return_address_panel.setVisible(settings.return_mode == "0")
+        self.return_combo.currentIndexChanged.connect(
+            lambda: self.return_address_panel.setVisible(self.return_combo.currentData() == "0"))
+        self.return_combo.activated.connect(self._return_selected)
+        self.province_combo.activated.connect(lambda: self._region_selected(1))
+        self.city_combo.activated.connect(lambda: self._region_selected(2))
+        grid.addWidget(QLabel("请求间隔"), 4, 0)
+        grid.addWidget(self.delay_spin, 4, 1)
+        grid.addWidget(self.skip_checkbox, 4, 2, 1, 4)
+        self.settings_status = QLabel("设置会自动保存到本机，下次启动自动恢复")
+        self.settings_status.setObjectName("muted")
+        self.settings_status.setWordWrap(True)
+        grid.addWidget(self.settings_status, 5, 0, 1, 6)
         for column in (1, 3, 5):
             grid.setColumnStretch(column, 1)
         layout.addWidget(self.settings_group)
@@ -268,14 +339,140 @@ class MainWindow(QMainWindow):
             fault_text=self.description_edit.text().strip(), deal_type=self.deal_combo.currentData(),
             repair_mode=self.repair_combo.currentData(), delay_ms=self.delay_spin.value(),
             skip_success=self.skip_checkbox.isChecked(),
+            return_mode=self.return_combo.currentData(), province=self.province_combo.currentText(),
+            city=self.city_combo.currentText(), area=self.area_combo.currentText(),
+            address=self.address_edit.text().strip(),
         )
+
+    def _connect_autosave(self):
+        for edit in (self.client_edit, self.contact_edit, self.phone_edit, self.address_edit):
+            edit.textChanged.connect(self._schedule_save)
+        for combo in (self.fault_combo, self.description_combo, self.deal_combo, self.repair_combo,
+                      self.return_combo, self.province_combo, self.city_combo, self.area_combo):
+            combo.currentTextChanged.connect(self._schedule_save)
+        self.delay_spin.valueChanged.connect(self._schedule_save)
+        self.skip_checkbox.toggled.connect(self._schedule_save)
+
+    def _schedule_save(self, *_args):
+        self.settings_status.setText("设置已修改，正在自动保存…")
+        self._save_timer.start()
+
+    def _persist_settings(self):
+        self._save_timer.stop()
+        settings = self.settings()
+        try:
+            if settings != self._saved_settings or not self.config_store.path.exists():
+                self.config_store.save(settings)
+                self._saved_settings = settings
+        except UserError:
+            self.settings_status.setText("设置保存失败，请检查数据目录或点击“保存设置”重试")
+            raise
+        self.settings_status.setText("设置已自动保存到本机，下次启动自动恢复")
+
+    def _autosave_settings(self):
+        try:
+            self._persist_settings()
+        except UserError as error:
+            self.log(str(error))
 
     def save_settings(self):
         try:
-            self.config_store.save(self.settings())
+            self._persist_settings()
             self.log("设置已保存，登录令牌不会写入配置。")
         except UserError as error:
             self._job_error(str(error), False)
+
+    def refresh_descriptions(self):
+        try:
+            records = self.journal.fault_descriptions()
+        except UserError as error:
+            self._job_error(str(error), False)
+            return
+        current = self.description_combo.currentText()
+        cursor = self.description_edit.cursorPosition()
+        with QSignalBlocker(self.description_combo):
+            self.description_combo.clear()
+            for record in records:
+                self.description_combo.addItem(record["description"])
+                self.description_combo.setItemData(self.description_combo.count() - 1,
+                    f"成功登记 {record['use_count']} 次 · 最近 {display_time(record['last_used'])}",
+                    Qt.ItemDataRole.ToolTipRole)
+            self.description_combo.setEditText(current)
+            self.description_edit.setCursorPosition(cursor)
+        self._description_history = {row["description"] for row in records}
+        self._update_description_delete()
+
+    def _update_description_delete(self, *_args):
+        self.delete_description_button.setEnabled(
+            self.description_combo.currentText().strip() in self._description_history)
+
+    def delete_description(self):
+        if self._busy:
+            return
+        try:
+            self.journal.delete_fault_description(self.description_combo.currentText())
+            self.refresh_descriptions()
+            self.status_label.setText("已从历史中删除该描述；当前输入和登记记录保留。")
+        except UserError as error:
+            self._job_error(str(error), False)
+
+    def _return_selected(self, *_args):
+        if self.return_combo.currentData() == "0" and self.token_edit.text().strip():
+            self.load_regions()
+
+    def _region_selected(self, start):
+        for combo in (self.province_combo, self.city_combo, self.area_combo)[start:]:
+            combo.clear()
+        self.load_regions(start)
+
+    def load_regions(self, start=0):
+        if self._busy:
+            return
+        try:
+            token = validate_token(self.token_edit.text())
+        except UserError as error:
+            self._job_error(str(error), False)
+            return
+        combos = (self.province_combo, self.city_combo, self.area_combo)
+        parent_code = str(combos[start - 1].currentData() or "") if start else ""
+        if start and not parent_code:
+            start = 0
+        previous = [combo.currentText() for combo in combos]
+        factory = self.api_factory
+        self._remember_token(token)
+        self.status_label.setText("正在加载官网省市区…")
+
+        def operation(worker):
+            result, parent = {}, parent_code if start else ""
+            with factory(token) as api:
+                for index in range(start, 3):
+                    if worker.stop_event.is_set():
+                        return None
+                    options = api.regions(("province", "city", "district")[index], parent)
+                    result[index] = options
+                    selected = next((item for item in options if item["name"] == previous[index]), None)
+                    if selected is None:
+                        break
+                    parent = selected["code"]
+            if worker.stop_event.is_set():
+                return None
+            return result
+
+        def complete(result):
+            if result is None:
+                self.status_label.setText("已停止加载省市区。")
+                return
+            for index in range(start, 3):
+                combo = combos[index]
+                with QSignalBlocker(combo):
+                    combo.clear()
+                    for item in result.get(index, []):
+                        combo.addItem(item["name"], item["code"])
+                    combo.setCurrentIndex(combo.findText(previous[index]))
+            self._schedule_save()
+            self.status_label.setText("省市区已加载，请依次选择并填写详细地址。")
+
+        self._start_job(operation, complete)
 
     def _remember_token(self, token):
         if token:
@@ -361,6 +558,7 @@ class MainWindow(QMainWindow):
         self._completion = None
         self._set_busy(False)
         self.refresh_history()
+        self.refresh_descriptions()
 
     def show_login(self):
         if self._busy:
@@ -425,7 +623,7 @@ class MainWindow(QMainWindow):
                 raise UserError("请先粘贴序列号")
             settings = self.settings()
             settings.validate(required=not query_only)
-            self.config_store.save(settings)
+            self._persist_settings()
         except UserError as error:
             self._job_error(str(error), False)
             return
@@ -531,6 +729,7 @@ class MainWindow(QMainWindow):
                 self.journal.reconcile(record["id"], registered=registered, note=note)
                 self.log(f"已更新 {record['serial']} 的人工核对结果。")
                 self.refresh_history()
+                self.refresh_descriptions()
             except UserError as error:
                 self._job_error(str(error), False)
 
@@ -542,7 +741,9 @@ class MainWindow(QMainWindow):
         if self._login_dialog is not None:
             self._login_dialog.reject()
         try:
-            self.config_store.save(self.settings())
+            self._persist_settings()
         except UserError as error:
             QMessageBox.warning(self, "设置未保存", str(error))
+            event.ignore()
+            return
         event.accept()

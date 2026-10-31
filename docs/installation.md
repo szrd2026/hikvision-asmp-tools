@@ -6,7 +6,7 @@
 
 ### Windows
 
-1. 下载 `Hikvision-ASMP-v2.0.0-windows-x86_64.zip`。
+1. 下载 `Hikvision-ASMP-v2.1.0-windows-x86_64.zip`。
 2. 完整解压到本地文件夹，保留 `_internal`。
 3. 运行 `HikvisionASMP.exe`。不需要安装 Python、PowerShell 模块或 WebView2。
 
@@ -40,15 +40,15 @@ sudo apt-get install libegl1 libopengl0 libnss3 libxkbcommon-x11-0 \
 
 ```powershell
 # Windows
-Get-FileHash .\Hikvision-ASMP-v2.0.0-windows-x86_64.zip -Algorithm SHA256
+Get-FileHash .\Hikvision-ASMP-v2.1.0-windows-x86_64.zip -Algorithm SHA256
 ```
 
 ```bash
 # Linux
-sha256sum Hikvision-ASMP-v2.0.0-linux-x86_64.tar.gz
+sha256sum Hikvision-ASMP-v2.1.0-linux-x86_64.tar.gz
 
 # macOS：替换为已下载的实际文件名
-shasum -a 256 Hikvision-ASMP-v2.0.0-macos-arm64.zip
+shasum -a 256 Hikvision-ASMP-v2.1.0-macos-arm64.zip
 ```
 
 ## 从源码运行

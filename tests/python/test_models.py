@@ -85,6 +85,42 @@ def test_complete_exchange(settings):
     assert build_payload("A", data, replace(settings, deal_type="1"))["rmaDetailList"][0]["changeType"] == "0"
 
 
+@pytest.mark.parametrize("mode", ["0", "1"])
+def test_return_mode_matches_header_and_every_detail(settings, mode):
+    configured = replace(settings, return_mode=mode, province="测试省", city="测试市", area="测试区", address="测试路1号")
+    payload = build_payload("A", {"productModel": "DS"}, configured)
+    assert type(payload["isSend"]) is int and payload["isSend"] == int(mode)
+    assert all(detail["isSend"] == payload["isSend"] for detail in payload["rmaDetailList"])
+    if mode == "0":
+        assert [payload[key] for key in ("province", "city", "area", "address")] == ["测试省", "测试市", "测试区", "测试路1号"]
+    else:
+        assert not any(payload[key] for key in ("province", "city", "area", "address"))
+    assert Settings.from_dict(configured.to_dict()) == configured
+
+
+@pytest.mark.parametrize("field", ["province", "city", "area", "address"])
+def test_return_to_customer_requires_complete_address_only_on_submit(settings, field):
+    configured = replace(settings, return_mode="0", province="测试省", city="测试市", area="测试区", address="测试路1号")
+    incomplete = replace(configured, **{field: "  "})
+    incomplete.validate(required=False)
+    with pytest.raises(UserError, match="寄回客户"):
+        build_payload("A", {"productModel": "DS"}, incomplete)
+
+
+@pytest.mark.parametrize("mode", ["", "2", "寄回客户", None, True])
+def test_invalid_return_mode_cannot_be_submitted(settings, mode):
+    with pytest.raises(UserError, match="返回方式"):
+        replace(settings, return_mode=mode).validate()
+
+
+def test_v2_config_without_return_mode_keeps_original_delivery_behavior(settings):
+    old = settings.to_dict()
+    for key in ("isSend", "province", "city", "area", "address"):
+        old.pop(key)
+    assert Settings.from_dict(old).return_mode == "1"
+    assert Settings.from_dict(old | {"isSend": 0}).return_mode == "0"
+
+
 @pytest.mark.parametrize("value", ["", "abc\r\nheader", "a;b", 'a"b', "a b", "a" * 16385])
 def test_token_validation(value):
     with pytest.raises(UserError):

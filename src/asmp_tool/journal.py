@@ -60,7 +60,7 @@ class Journal:
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         with self.connection() as db:
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version > 1:
+            if version > 2:
                 raise JournalError("记录数据库来自较新版本，请使用对应版本打开")
             db.execute("PRAGMA journal_mode=WAL")
             if db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
@@ -71,7 +71,8 @@ class Journal:
                     serial_key TEXT NOT NULL, model TEXT NOT NULL DEFAULT '',
                     state TEXT NOT NULL CHECK(state IN ('pending','unknown','succeeded','rejected','failed','auth')),
                     message TEXT NOT NULL DEFAULT '', rma_id TEXT NOT NULL DEFAULT '',
-                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL, legacy_source TEXT
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL, legacy_source TEXT,
+                    fault_text TEXT NOT NULL DEFAULT ''
                 );
                 CREATE INDEX IF NOT EXISTS ix_serial ON attempts(serial_key,state);
                 CREATE TABLE IF NOT EXISTS events (
@@ -79,10 +80,17 @@ class Journal:
                     state TEXT NOT NULL, note TEXT NOT NULL, created_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-                PRAGMA user_version=1;
+                CREATE TABLE IF NOT EXISTS fault_descriptions (
+                    description TEXT PRIMARY KEY,
+                    use_count INTEGER NOT NULL CHECK(use_count > 0),
+                    last_used TEXT NOT NULL
+                );
             """)
             # Repair data created by an earlier prototype of the v2 importer as well.
             db.execute("BEGIN IMMEDIATE")
+            if "fault_text" not in {row["name"] for row in db.execute("PRAGMA table_info(attempts)")}:
+                db.execute("ALTER TABLE attempts ADD COLUMN fault_text TEXT NOT NULL DEFAULT ''")
+            db.execute("PRAGMA user_version=2")
             for row in db.execute("SELECT id,message FROM attempts WHERE legacy_source IS NOT NULL AND state='rejected'").fetchall():
                 if row["message"].startswith(("失败:", "失败：")) and legacy_state(row["message"]) == "unknown":
                     db.execute("UPDATE attempts SET state='unknown',updated_at=? WHERE id=?", (stamp(), row["id"]))
@@ -123,16 +131,16 @@ class Journal:
     def _event(db, attempt_id: str, state: str, note: str) -> None:
         db.execute("INSERT INTO events(attempt_id,state,note,created_at) VALUES(?,?,?,?)", (attempt_id, state, note, stamp()))
 
-    def reserve(self, serial: str, model: str, batch_id: str, *, skip_success: bool) -> str:
+    def reserve(self, serial: str, model: str, batch_id: str, *, skip_success: bool, fault_text: str = "") -> str:
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             status = self._status(db, serial)
             if status == "pending" or status == "succeeded" and skip_success:
                 raise RecordBlocked(status)
             attempt_id, now = str(uuid4()), stamp()
-            db.execute("""INSERT INTO attempts(id,batch_id,serial,serial_key,model,state,created_at,updated_at)
-                          VALUES(?,?,?,?,?,'pending',?,?)""",
-                       (attempt_id, batch_id, serial, serial.casefold(), model, now, now))
+            db.execute("""INSERT INTO attempts(id,batch_id,serial,serial_key,model,state,created_at,updated_at,fault_text)
+                          VALUES(?,?,?,?,?,'pending',?,?,?)""",
+                       (attempt_id, batch_id, serial, serial.casefold(), model, now, now, fault_text.strip()))
             self._event(db, attempt_id, "pending", "请求发出前持久保存提交意图")
             db.commit()  # FULL synchronous: the intent must reach disk before the POST.
             return attempt_id
@@ -148,7 +156,24 @@ class Journal:
             if not changed:
                 raise JournalError("记录状态已经改变，已停止更新")
             self._event(db, attempt_id, state, message)
+            if state == "succeeded":
+                description = db.execute("SELECT fault_text FROM attempts WHERE id=?", (attempt_id,)).fetchone()[0]
+                if description:
+                    db.execute("""INSERT INTO fault_descriptions(description,use_count,last_used) VALUES(?,1,?)
+                                  ON CONFLICT(description) DO UPDATE SET
+                                      use_count=use_count+1, last_used=excluded.last_used""",
+                               (description, stamp()))
             db.commit()
+
+    def fault_descriptions(self) -> list[dict]:
+        with self.connection() as db:
+            return [dict(row) for row in db.execute(
+                "SELECT * FROM fault_descriptions ORDER BY use_count DESC, last_used DESC, description ASC"
+            )]
+
+    def delete_fault_description(self, description: str) -> None:
+        with self.connection() as db:
+            db.execute("DELETE FROM fault_descriptions WHERE description=?", (description.strip(),))
 
     def record_failure(self, serial: str, model: str, batch_id: str, message: str, *, auth: bool = False) -> None:
         with self.connection() as db:

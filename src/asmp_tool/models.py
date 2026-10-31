@@ -14,6 +14,7 @@ CHINA_TIME = timezone(timedelta(hours=8))
 FAULT_OPTIONS = ["无图像", "不断重启", "搜索不到", "硬盘/SD卡故障", "不上电", "不能录像", "外观异常", "密码错误", "其他"]
 DEAL_OPTIONS = {"0": "维修", "1": "一年包换", "2": "本地服务"}
 REPAIR_OPTIONS = {"0": "送修", "1": "上门取件", "2": "寄修"}
+RETURN_OPTIONS = {"1": "寄回送修点", "0": "寄回客户"}
 
 
 class UserError(Exception):
@@ -41,6 +42,11 @@ class Settings:
     repair_mode: str = "2"
     delay_ms: int = 500
     skip_success: bool = True
+    return_mode: str = "1"
+    province: str = ""
+    city: str = ""
+    area: str = ""
+    address: str = ""
 
     def validate(self, *, required: bool = True) -> None:
         for name, value in [("送修客户", self.repair_client), ("联系人", self.linkman),
@@ -54,6 +60,16 @@ class Settings:
                 raise UserError(f"{name}内容过长或含非法控制字符")
         if self.deal_type not in DEAL_OPTIONS or self.repair_mode not in REPAIR_OPTIONS:
             raise UserError("处理方式或接修方式无效")
+        if self.return_mode not in RETURN_OPTIONS:
+            raise UserError("请选择有效的返回方式")
+        for name, value in [("省份", self.province), ("城市", self.city),
+                            ("区域", self.area), ("详细地址", self.address)]:
+            if not isinstance(value, str):
+                raise UserError(f"{name}必须为文本")
+            if required and self.return_mode == "0" and not value.strip():
+                raise UserError(f"寄回客户时请填写{name}")
+            if len(value) > 4000 or any(ord(c) < 32 and c not in "\r\n\t" for c in value):
+                raise UserError(f"{name}内容过长或含非法控制字符")
         if type(self.delay_ms) is not int or not 0 <= self.delay_ms <= 600000:
             raise UserError("间隔必须是 0 至 600000 毫秒的整数")
         if type(self.skip_success) is not bool:
@@ -73,6 +89,9 @@ class Settings:
                 fault_text=data.get("rebackFaulttext", ""), deal_type=str(data.get("dealType", "2")),
                 repair_mode=str(data.get("repairMode", "2")), delay_ms=int(raw_delay),
                 skip_success=data.get("skip", True),
+                return_mode=str(data.get("isSend", "1")),
+                province=data.get("province", ""), city=data.get("city", ""),
+                area=data.get("area", ""), address=data.get("address", ""),
             )
             settings.validate(required=False)
             return settings
@@ -85,6 +104,8 @@ class Settings:
             "rebackFault": self.reback_fault, "rebackFaulttext": self.fault_text,
             "dealType": self.deal_type, "repairMode": self.repair_mode,
             "delay": self.delay_ms, "skip": self.skip_success,
+            "isSend": self.return_mode, "province": self.province, "city": self.city,
+            "area": self.area, "address": self.address,
         }
 
 
@@ -141,7 +162,7 @@ def build_payload(serial: str, data: dict[str, Any], settings: Settings) -> dict
         if str(data.get("changeType")) not in {"0", "1"}:
             raise UserError("一年包换需要选择更换方式，请在网页完成这类登记")
     detail: dict[str, Any] = {
-        "uuid": str(uuid4()), "isSend": 1, "serialId": serial,
+        "uuid": str(uuid4()), "isSend": int(settings.return_mode), "serialId": serial,
         "rebackFault": settings.reback_fault, "rebackFaulttext": settings.fault_text,
         "dealType": settings.deal_type,
         "changeType": str(data["changeType"]) if settings.deal_type == "1" else "",
@@ -157,8 +178,12 @@ def build_payload(serial: str, data: dict[str, Any], settings: Settings) -> dict
         detail["zprPrice"] = data["zprPrice"]
     return {
         "createTime": datetime.now(CHINA_TIME).strftime("%Y-%m-%d %H:%M:%S"),
-        "city": "", "area": "", "province": None, "address": None, "fax": None, "remark": None,
+        "city": settings.city if settings.return_mode == "0" else "",
+        "area": settings.area if settings.return_mode == "0" else "",
+        "province": settings.province if settings.return_mode == "0" else None,
+        "address": settings.address if settings.return_mode == "0" else None,
+        "fax": None, "remark": None,
         "repairClient": settings.repair_client, "linkman": settings.linkman, "linknumber": settings.linknumber,
-        "repairMode": int(settings.repair_mode), "isSend": 1, "state": 1, "isMessage": "0",
+        "repairMode": int(settings.repair_mode), "isSend": int(settings.return_mode), "state": 1, "isMessage": "0",
         "rmaDetailList": [detail],
     }

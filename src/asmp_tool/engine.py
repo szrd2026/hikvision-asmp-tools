@@ -104,7 +104,9 @@ class BatchEngine:
                     else:
                         # This transaction re-checks duplicates atomically before persisting intent.
                         try:
-                            attempt_id = self.journal.reserve(serial, model, batch_id, skip_success=settings.skip_success)
+                            attempt_id = self.journal.reserve(serial, model, batch_id,
+                                                              skip_success=settings.skip_success,
+                                                              fault_text=settings.fault_text)
                         except RecordBlocked as error:
                             summary.skipped += 1
                             on_item(ItemResult(serial, "skipped", model, str(error), data))

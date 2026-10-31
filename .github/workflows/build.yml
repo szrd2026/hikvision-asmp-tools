@@ -45,10 +45,10 @@ jobs:
         with:
           name: asmp-${{ matrix.target }}
           path: |
-            dist/*v2.0.0*.zip
-            dist/*v2.0.0*.tar.gz
-            dist/*v2.0.0*.sha256
-            dist/checksums-v2.0.0.txt
+            dist/Hikvision-ASMP-v*.zip
+            dist/Hikvision-ASMP-v*.tar.gz
+            dist/Hikvision-ASMP-v*.sha256
+            dist/checksums-v*.txt
           if-no-files-found: error
       - name: Upload build diagnostics on failure
         if: failure()

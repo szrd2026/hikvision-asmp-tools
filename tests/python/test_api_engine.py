@@ -93,6 +93,7 @@ def test_complete_batch_deduplicates_and_skips_success(tmp_path, settings, accou
     calls.clear()
     result = engine.run("A\nB", TOKEN, settings, Event())
     assert result.skipped == 2 and len(calls) == 1
+    assert journal.fault_descriptions()[0]["use_count"] == 2
 
 
 @pytest.mark.parametrize("kind", ["timeout", "http500", "html", "empty"])
@@ -113,6 +114,7 @@ def test_uncertain_submission_blocks_even_if_skip_unchecked(tmp_path, settings, 
     result = engine.run("A", TOKEN, replace(settings, skip_success=False), Event())
     assert result.skipped == 1 and len(calls) == 1
     assert TOKEN not in json.dumps(journal.records())
+    assert journal.fault_descriptions() == []
 
 
 def test_expired_submit_stops_batch(tmp_path, settings, account):
@@ -130,6 +132,7 @@ def test_query_only_never_submits_or_creates_journal(tmp_path, settings, account
     result = BatchEngine(journal, factory_for(journal, account, calls)).run("A\nB", TOKEN, settings, Event(), query_only=True)
     assert result.queried == 2 and not journal.records()
     assert not any(path.endswith("setNewRma") for path in calls)
+    assert journal.fault_descriptions() == []
 
 
 def test_stop_during_query_prevents_submit(tmp_path, settings, account):
@@ -187,3 +190,28 @@ def test_stop_during_durable_reservation_prevents_post(tmp_path, settings, accou
     result = BatchEngine(journal, factory_for(journal, account, calls)).run("A", TOKEN, settings, stop)
     assert result.stopped and len(calls) == 2
     assert journal.status("A") is None
+
+
+def test_customer_return_without_address_is_blocked_before_network(tmp_path, settings, account):
+    journal = Journal(tmp_path / "db")
+    calls = []
+    engine = BatchEngine(journal, factory_for(journal, account, calls))
+    with pytest.raises(UserError, match="寄回客户"):
+        engine.run("A", TOKEN, replace(settings, return_mode="0"), Event())
+    assert not calls and not journal.records()
+
+
+def test_regions_use_official_read_only_contract():
+    def handler(request):
+        assert request.method == "GET" and request.url.path.endswith("/base/getProvinceCityArea")
+        assert dict(request.url.params) == {"locationType": "city", "parentCode": "P001", "keyword": ""}
+        return response(request, body={"code": "000", "data": [{"locationName": "测试市", "locationCode": 123}]})
+    with ApiClient(TOKEN, transport=httpx.MockTransport(handler)) as api:
+        assert api.regions("city", "P001") == [{"name": "测试市", "code": "123"}]
+
+
+@pytest.mark.parametrize("data", [None, {}, [None], [{"locationName": "测试", "locationCode": ""}]])
+def test_malformed_regions_are_not_used(data):
+    with ApiClient(TOKEN, transport=httpx.MockTransport(lambda req: response(req, body={"code": "000", "data": data}))) as api:
+        with pytest.raises(UserError):
+            api.regions("province")

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-31
+
+- Expose the previously fixed return method in the form; keep header/detail `isSend` values consistent.
+- Support return to the customer with required province/city/district/address and official cascading region choices.
+- Autosave settings after editing, show save status, and restore all registration fields on restart.
+- Add an editable fault-description dropdown ranked by successful device registrations, with persistent deletion.
+- Count confirmed successes and manual reconciliations atomically with the submission record; exclude failed, uncertain, skipped and query-only attempts.
+- Upgrade the SQLite schema while preserving existing registration states; retain the old return-to-point default for existing configurations.
+- Add regression coverage for request mapping, autosave failures, restart persistence, region selection and description history.
+
 ## [2.0.0] - 2026-10-31
 
 - Rewrite the desktop application in Python, PySide6 and QtWebEngine for Windows, Linux and macOS.
@@ -61,3 +71,5 @@ Local development snapshot; not published as a separate GitHub release.
 - The application depends on Hikvision ASMP web endpoints that are not part of
   a public, versioned API. Endpoint or payload changes on the server side may
   require a client update.
+
+[2.1.0]: https://github.com/szrd2026/hikvision-asmp-tools/compare/v2.0.0...v2.1.0

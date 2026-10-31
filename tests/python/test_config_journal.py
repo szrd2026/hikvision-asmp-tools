@@ -2,6 +2,7 @@ import csv
 import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 
 import pytest
 
@@ -199,3 +200,90 @@ def test_earlier_importer_data_is_repaired_without_source_csv(tmp_path):
         db.execute("UPDATE attempts SET legacy_source='old.csv' WHERE id=?", (attempt,))
     reopened = Journal(tmp_path / "db")
     assert reopened.status("A") == "pending"
+
+
+def test_return_address_and_incomplete_form_are_persisted(tmp_path, settings):
+    store = ConfigStore(tmp_path)
+    configured = replace(settings, return_mode="0", province="测试省", city="测试市", area="测试区", address="测试路")
+    store.save(configured)
+    assert ConfigStore(tmp_path).load()[0] == configured
+    partial = replace(configured, linkman="", area="")
+    store.save(partial)
+    assert ConfigStore(tmp_path).load()[0] == partial
+
+
+def test_description_counts_order_delete_and_reopen(tmp_path):
+    journal = Journal(tmp_path / "db")
+    for serial, description in enumerate(["  无图像  ", "无图像", "偶发重启"]):
+        attempt = journal.reserve(str(serial), "DS", "B", skip_success=True, fault_text=description)
+        journal.finish(attempt, "succeeded", "ok")
+    records = journal.fault_descriptions()
+    assert [(row["description"], row["use_count"]) for row in records] == [("无图像", 2), ("偶发重启", 1)]
+    other = Journal(tmp_path / "db")
+    assert other.fault_descriptions() == records
+    other.delete_fault_description("无图像")
+    assert [row["description"] for row in Journal(tmp_path / "db").fault_descriptions()] == ["偶发重启"]
+    assert len(other.records()) == 3 and all(row["state"] == "succeeded" for row in other.records())
+    new = other.reserve("NEW", "DS", "B", skip_success=True, fault_text="无图像")
+    other.finish(new, "succeeded", "ok")
+    assert next(row["use_count"] for row in other.fault_descriptions() if row["description"] == "无图像") == 1
+
+
+def test_description_ties_use_last_success_time(tmp_path):
+    journal = Journal(tmp_path / "db")
+    for description in ("较旧", "较新"):
+        attempt = journal.reserve(description, "DS", "B", skip_success=True, fault_text=description)
+        journal.finish(attempt, "succeeded", "ok")
+    with journal.connection() as db:
+        db.execute("UPDATE fault_descriptions SET last_used='2026-01-01' WHERE description='较旧'")
+        db.execute("UPDATE fault_descriptions SET last_used='2026-01-02' WHERE description='较新'")
+    assert [row["description"] for row in journal.fault_descriptions()] == ["较新", "较旧"]
+
+
+@pytest.mark.parametrize("state", ["pending", "unknown", "rejected", "auth"])
+def test_description_counts_only_confirmed_success(tmp_path, state):
+    journal = Journal(tmp_path / "db")
+    attempt = journal.reserve("A", "DS", "B", skip_success=True, fault_text="测试故障")
+    if state != "pending":
+        journal.finish(attempt, state, "test")
+    assert journal.fault_descriptions() == []
+    if state in {"pending", "unknown"}:
+        journal.reconcile(attempt, registered=True, note="官网确认已登记")
+        assert journal.fault_descriptions()[0]["use_count"] == 1
+        with pytest.raises(JournalError):
+            journal.reconcile(attempt, registered=True, note="不能重复计数")
+        assert journal.fault_descriptions()[0]["use_count"] == 1
+
+
+def test_description_history_update_is_atomic_with_success(tmp_path):
+    journal = Journal(tmp_path / "db")
+    attempt = journal.reserve("A", "DS", "B", skip_success=True, fault_text="故障")
+    with journal.connection() as db:
+        db.executescript("""CREATE TRIGGER fail_history BEFORE INSERT ON fault_descriptions
+                            BEGIN SELECT RAISE(ABORT, 'test disk failure'); END;""")
+    with pytest.raises(JournalError):
+        journal.finish(attempt, "succeeded", "ok")
+    assert journal.status("A") == "pending" and journal.fault_descriptions() == []
+    with journal.connection() as db:
+        assert db.execute("SELECT count(*) FROM events").fetchone()[0] == 1
+
+
+def test_v1_database_upgrades_without_inventing_description_history(tmp_path):
+    path = tmp_path / "db"
+    journal = Journal(path)
+    attempt = journal.reserve("OLD", "DS", "B", skip_success=True)
+    journal.finish(attempt, "succeeded", "ok", "OLD-RMA")
+    pending = journal.reserve("PENDING", "DS", "B", skip_success=True)
+    with journal.connection() as db:
+        db.execute("ALTER TABLE attempts DROP COLUMN fault_text")
+        db.execute("DROP TABLE fault_descriptions")
+        db.execute("PRAGMA user_version=1")
+    upgraded = Journal(path)
+    assert upgraded.status("OLD") == "succeeded" and upgraded.status("PENDING") == "pending"
+    assert upgraded.fault_descriptions() == []
+    assert {row["id"] for row in upgraded.records()} == {attempt, pending}
+    with upgraded.connection() as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+    new = upgraded.reserve("NEW", "DS", "B", skip_success=True, fault_text="新故障")
+    upgraded.finish(new, "succeeded", "ok")
+    assert Journal(path).fault_descriptions()[0]["use_count"] == 1
