@@ -28,8 +28,8 @@ Ubuntu 22.04 常用运行依赖：
 sudo apt-get update
 sudo apt-get install libegl1 libopengl0 libnss3 libxkbcommon-x11-0 \
   libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
-  libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1 libxcomposite1 \
-  libxdamage1 libxrandr2 libxtst6 libasound2 libgbm1 fonts-noto-cjk
+  libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1 libxcb-shape0 libxcomposite1 \
+  libxdamage1 libxrandr2 libxtst6 libasound2 libpulse0 libgbm1 fonts-noto-cjk
 ```
 
 应用使用 QtWebEngine 默认沙箱，不自动修改系统安全设置。Linux ARM 暂不提供原生构建任务。

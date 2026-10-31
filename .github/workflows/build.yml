@@ -33,7 +33,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb fonts-noto-cjk libegl1 libopengl0 libnss3 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1 libxcomposite1 libxdamage1 libxrandr2 libxtst6 libasound2 libgbm1
+          sudo apt-get install -y xvfb fonts-noto-cjk libegl1 libopengl0 libnss3 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1 libxcb-shape0 libxcomposite1 libxdamage1 libxrandr2 libxtst6 libasound2 libpulse0 libgbm1
       - run: python -m pip install -r requirements-dev.txt
       - name: Test and package (Windows / macOS)
         if: runner.os != 'Linux'
@@ -50,3 +50,14 @@ jobs:
             dist/*v2.0.0*.sha256
             dist/checksums-v2.0.0.txt
           if-no-files-found: error
+      - name: Upload build diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: diagnostics-${{ matrix.target }}
+          path: |
+            .tmp/frozen-smoke-*/smoke-console.log
+            .tmp/frozen-smoke-*/smoke-result.json
+            build/pyinstaller/HikvisionASMP/warn-HikvisionASMP.txt
+          include-hidden-files: true
+          if-no-files-found: ignore
