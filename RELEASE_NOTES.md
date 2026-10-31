@@ -1,104 +1,36 @@
-# v1.0.0 · Initial public release
+# v2.0.0 · Python 跨平台重构
 
-**Release date:** 2026-10-30
+2.0 将 PowerShell/WinForms 程序完整重写为 Python + PySide6 + QtWebEngine + SQLite。原有配置范围、固定字段及“每个序列号一份登记”的行为保留，界面、登录与业务代码共用于 Windows、Linux 和 macOS。
 
-A portable Windows utility for batch RMA registration on Hikvision ASMP.
-Paste serial numbers from Excel, review the live log, and let the tool perform
-the detail lookup and `setNewRma` submission for each unit.
+## 新增
 
-## Highlights / 亮点
+- 在官方网页内完成登录，自动获取并验证会话令牌。
+- 只读查询、逐条型号与保修结果表、后台任务及停止操作。
+- SQLite 提交意图、历史记录、筛选导出和人工核对事件。
+- 原有配置和四列 CSV 的事务迁移与增量导入。
+- 四目标原生构建、打包后的离线 Chromium 启动检查及 SHA-256 文件。
 
-- Bulk serial-number input from Excel/WPS.
-- Automatic ASMP detail lookup and RMA payload assembly.
-- Configurable repair client, contact, phone, fault information and request
-  interval.
-- Duplicate-submission guard based on local success records.
-- Live log plus per-run log files and CSV records.
-- No installer, no administrator rights and no third-party PowerShell modules.
-- TLS 1.2-only outbound HTTPS.
+## 修复与保护
 
-## Added / 新增
+- 超时、断线和异常响应不再直接作为可重试失败；结果不明确时保留待核对记录。
+- 历史成功不会被后一次失败覆盖；待核对记录始终优先保护。
+- 提交前持久保存意图，写入失败不发送；提交不自动重放。
+- 识别认证失效并停止任务，校验权限、网点能力及产品条件。
+- 保留查询返回的产品、质检、附件和物料字段；不保存明文令牌或完整业务报文。
+- 旧版缺少明确拒绝依据的失败记录按待核对处理，避免迁移后重复登记。
 
-- `ASMPSubmitTool.ps1` — WinForms desktop application.
-- `Start-Submit.bat` — one-click Windows launcher.
-- `submit_config.example.json` — sanitized configuration template.
-- `build.ps1` — reproducible portable ZIP and SHA-256 builder.
-- English README with a Chinese quick-start section.
-- MIT license and initial changelog.
+## 下载与升级
 
-## Fixed / 修复
+选择 Release 页面实际提供的对应平台附件，完整解压。原生包包含 Python 运行时，源码包需要自行安装依赖。
 
-- Not applicable; this is the first public release.
+- Windows：运行 `HikvisionASMP.exe`，保留 `_internal`。
+- Linux x86_64：构建基线 Ubuntu 22.04。
+- macOS：区分 Intel 与 Apple Silicon，当前依赖要求 macOS 14+；临时签名不等于 Developer ID 签名或公证。
 
-## Security / 安全
+升级前关闭 1.x，保留原配置和 CSV，按 [升级说明](docs/migration.md) 迁移。历史 PowerShell 实现归档在 `legacy/powershell/`；[1.0 发布记录](https://github.com/szrd2026/hikvision-asmp-tools/releases/tag/v1.0.0) 保留。
 
-- Removed all previously hard-coded credentials and operator-specific personal
-  data from the published source.
-- Replaced real defaults with clearly marked sample values.
-- Added `.gitignore` rules for local tokens, logs, records and build output.
-- Limited outbound HTTPS to TLS 1.2.
+## 验证范围
 
-## Known issues / 已知问题
+核心与 Qt 界面测试使用模拟请求；原生构建检查打包后的窗口和离线 Chromium。Windows 真实账号登录、真实设备只读查询已验证。真实维修登记提交尚未做实单验证，CI 成功不等于每个平台的真实 ASMP 业务验证。
 
-- The application relies on Hikvision ASMP web endpoints that are not a public,
-  versioned API. Server-side changes may require a client update.
-- Access tokens expire. There is no automatic refresh; copy a new token when
-  the tool reports `notLogin`.
-- The release is not code-signed. See the SmartScreen note below.
-- Logs and `submit_records.csv` can contain serial numbers and customer
-  information. They are excluded from Git, but users must protect them locally.
-- The user interface is currently Chinese-only.
-- Live submission was not exercised during packaging verification because no
-  production token was used. GUI startup, configuration loading, package
-  extraction and script parsing were verified locally.
-
-## Assets / 附件说明
-
-| Asset | Purpose | Requirements |
-| --- | --- | --- |
-| `Hikvision-ASMP-Submit-v1.0.0-win64.zip` | Portable application package. Extract and run `Start-Submit.bat`. | Windows 10/11 x64, Windows PowerShell 5.1, ASMP account, HTTPS access to `asmp.hikvision.com` |
-| `checksums.txt` | SHA-256 checksum for the ZIP. | Any text editor or `Get-FileHash` |
-
-**System requirements:** Windows 10 or Windows 11 (x64), Windows PowerShell 5.1
-(built in), an authorized Hikvision ASMP account, and network access to
-`https://asmp.hikvision.com`. Administrator rights are not required.
-
-## SHA-256
-
-```text
-049d42c52df3ae68b904f32790cd5f55da3be9c41db785c28261aef4d51d7c4d  Hikvision-ASMP-Submit-v1.0.0-win64.zip
-```
-
-File size: **35,583 bytes**.
-
-Verify after download:
-
-```powershell
-Get-FileHash .\Hikvision-ASMP-Submit-v1.0.0-win64.zip -Algorithm SHA256
-```
-
-## Installation / 安装
-
-1. Download the ZIP from this release.
-2. Extract it to a local folder. Do not run it from inside the archive.
-3. Double-click `Start-Submit.bat`.
-4. Copy a fresh `accesstoken` from the ASMP web portal:
-   `F12` → **Network** → any ASMP request → **Request Headers** → `accesstoken`.
-5. Replace the sample repair information with your own data, paste the serial
-   numbers and start the batch.
-
-## SmartScreen note / 签名提示
-
-This release is not code-signed. **未签名 exe 会被 SmartScreen 提示未知发布者，
-属正常现象。** This version is distributed as a ZIP with batch/PowerShell
-files rather than an exe; browsers or Windows may still mark the downloaded ZIP
-as coming from the internet. Verify the SHA-256 above, then use
-**Properties → Unblock** before extracting if necessary.
-
-## Disclaimer / 免责声明
-
-This is an unofficial project and is not affiliated with, endorsed by, or
-supported by Hikvision. Use it only with accounts you are authorized to
-operate, and comply with Hikvision's terms, your organization's policies and
-applicable law. The software is provided under the MIT license, without
-warranty.
+平台构建结果见 [Actions](https://github.com/szrd2026/hikvision-asmp-tools/actions/workflows/build.yml)。安装、校验和及源代码运行方式见 [README](README.md)。
