@@ -61,10 +61,12 @@ def main(argv=None) -> int:
     app.setStyle("Fusion")
     # Import WebEngine before constructing any view, on the GUI's main thread.
     from .ui.window import MainWindow
-    data_dir = args.data_dir or (Path(tempfile.mkdtemp(prefix="asmp-smoke-")) if smoke else default_data_directory())
+    data_dir = args.data_dir
     legacy_dir = args.legacy_dir or (None if smoke else application_directory())
     lock = None
     try:
+        if data_dir is None:
+            data_dir = Path(tempfile.mkdtemp(prefix="asmp-smoke-")) if smoke else default_data_directory()
         data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         lock = acquire_instance_lock(data_dir)
         config = ConfigStore(data_dir, legacy_dir)
@@ -81,7 +83,9 @@ def main(argv=None) -> int:
         if smoke:
             print(message, file=sys.stderr)
         else:
-            QMessageBox.critical(None, "ASMP 启动失败", message + "\n数据目录：" + str(data_dir))
+            if data_dir is not None:
+                message += "\n数据目录：" + str(data_dir)
+            QMessageBox.critical(None, "ASMP 启动失败", message)
         if lock:
             lock.unlock()
         return 1

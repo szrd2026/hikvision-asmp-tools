@@ -14,6 +14,8 @@
 
 如果系统用户数据目录无法写入，可以启用便携模式：关闭所有版本的程序，在 `HikvisionASMP.exe` 旁创建 `portable-mode.txt`，程序将使用同目录的 `data` 文件夹。已有数据时，先将原数据目录的 `submit_config.json`、`submit_records.sqlite3` 和日志迁入 `data`，再启动；不要仅建立空目录而遗漏历史登记记录。以后移动程序时一并保留 `portable-mode.txt` 和 `data`。命令行 `--data-dir` 仍优先于便携模式。
 
+源码和原生包都支持指定已有目录。在 `run.py` 或 EXE 旁创建 UTF-8 编码的 `data-directory.txt`，只写一行数据目录路径。相对路径以该文件所在目录为基准。命令行 `--data-dir` 优先，其次是这个路径文件，最后是便携模式或系统默认目录。同一目录一次只运行一个版本。
+
 ### macOS
 
 选择 Intel 的 `macos-x86_64.zip` 或 Apple Silicon 的 `macos-arm64.zip`，解压后打开 `.app`。当前依赖的公开 wheel 要求 macOS 14+。

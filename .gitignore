@@ -2,6 +2,9 @@
 # Local secrets and runtime configuration
 # ---------------------------------------------------------------------------
 submit_config.json
+data-directory.txt
+portable-mode.txt
+/data/
 hik_token.txt
 *.token
 *.secret

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.2.0] - 2026-11-21
 
 - Recreate the embedded browser page on retry after renderer termination and report the failure separately from network errors.
+- Let source and native launches reuse a writable data directory through an explicit path file.
 - Offer an official system-browser link and verify rendered login fields in the live smoke check.
 - Report ASMP security policy refusals without treating them as expired sessions.
 - Remember up to 50 recent repair customers in a searchable dropdown with persistent deletion.

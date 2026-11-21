@@ -1,6 +1,6 @@
 # Hikvision ASMP Tools
 
-**海康 ASMP 批量登记工具 · Python 2.1**
+**海康 ASMP 批量登记工具 · Python 2.2**
 
 [![Build](https://github.com/szrd2026/hikvision-asmp-tools/actions/workflows/build.yml/badge.svg)](https://github.com/szrd2026/hikvision-asmp-tools/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/szrd2026/hikvision-asmp-tools)](https://github.com/szrd2026/hikvision-asmp-tools/releases/latest)
@@ -73,7 +73,7 @@
 
 - 登录窗口使用内存浏览器会话；程序只读取业务所需 Cookie，不读取账号或密码，不将令牌写入配置或日志。
 - 每次任务检查认证；登录失效会停止任务，再登录后重新启动。
-- 配置、SQLite 记录及日志默认保存在系统用户数据目录。原生包可通过 `portable-mode.txt` 使用程序旁的 `data` 文件夹，操作及迁移方法见 [安装说明](docs/installation.md)。备份前关闭程序。
+- 配置、SQLite 记录及日志默认保存在系统用户数据目录。可用 `data-directory.txt` 继续使用已有的可写数据目录，或用 `portable-mode.txt` 使用程序旁的 `data` 文件夹。备份前关闭程序。详见 [安装说明](docs/installation.md)。
 - 日志保留步骤、序列号和必要结果，不保存完整业务报文。
 
 | 系统 | 默认数据目录 |

@@ -19,8 +19,17 @@ def application_directory() -> Path:
 
 
 def default_data_directory() -> Path:
-    if getattr(sys, "frozen", False):
-        directory = application_directory()
+    directory = application_directory()
+    if getattr(sys, "frozen", False) or (directory / "run.py").is_file():
+        location = directory / "data-directory.txt"
+        if location.is_file():
+            try:
+                selected = location.read_text(encoding="utf-8-sig").strip()
+                if not selected or "\n" in selected or "\r" in selected:
+                    raise ValueError
+                return (directory / selected).resolve()
+            except (OSError, ValueError) as error:
+                raise UserError("无法读取 data-directory.txt，请填写一行有效的数据目录路径") from error
         if (directory / "portable-mode.txt").is_file():
             return directory / "data"
     if sys.platform == "win32":

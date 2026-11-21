@@ -59,3 +59,15 @@ def test_portable_data_is_explicit_and_relative_to_executable(tmp_path, monkeypa
         (installation / "portable-mode.txt").touch()
     expected = installation / "data" if portable else tmp_path / "user-data" / "HikvisionASMP"
     assert config.default_data_directory() == expected
+
+
+def test_source_launcher_can_reuse_existing_portable_data(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "run.py").touch()
+    (source / "portable-mode.txt").touch()
+    (source / "data-directory.txt").write_text("../existing/data\n", encoding="utf-8")
+    monkeypatch.setattr(config, "application_directory", lambda: source)
+    assert config.default_data_directory() == tmp_path / "existing/data"
+    (source / "data-directory.txt").unlink()
+    assert config.default_data_directory() == source / "data"
