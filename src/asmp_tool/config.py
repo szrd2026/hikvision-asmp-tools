@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 
 from .models import Settings, UserError, validate_token
@@ -18,6 +19,10 @@ def application_directory() -> Path:
 
 
 def default_data_directory() -> Path:
+    if getattr(sys, "frozen", False):
+        directory = application_directory()
+        if (directory / "portable-mode.txt").is_file():
+            return directory / "data"
     if sys.platform == "win32":
         base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local"))
     elif sys.platform == "darwin":
@@ -28,9 +33,9 @@ def default_data_directory() -> Path:
 
 
 def atomic_json(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     name = None
     try:
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, prefix=".config-", suffix=".tmp", delete=False) as stream:
             name = Path(stream.name)
             json.dump(data, stream, ensure_ascii=False, indent=2)
@@ -42,7 +47,8 @@ def atomic_json(path: Path, data: dict) -> None:
         raise UserError("无法保存配置，请检查数据目录的写入权限") from error
     finally:
         if name is not None:
-            name.unlink(missing_ok=True)
+            with suppress(OSError):
+                name.unlink(missing_ok=True)
 
 
 class ConfigStore:

@@ -6,11 +6,13 @@
 
 ### Windows
 
-1. 下载 `Hikvision-ASMP-v2.1.0-windows-x86_64.zip`。
+1. 下载 `Hikvision-ASMP-v2.2.0-windows-x86_64.zip`。
 2. 完整解压到本地文件夹，保留 `_internal`。
 3. 运行 `HikvisionASMP.exe`。不需要安装 Python、PowerShell 模块或 WebView2。
 
 目标为 Windows 10/11 x86_64。发布包尚未使用维护者的代码签名证书。
+
+如果系统用户数据目录无法写入，可以启用便携模式：关闭所有版本的程序，在 `HikvisionASMP.exe` 旁创建 `portable-mode.txt`，程序将使用同目录的 `data` 文件夹。已有数据时，先将原数据目录的 `submit_config.json`、`submit_records.sqlite3` 和日志迁入 `data`，再启动；不要仅建立空目录而遗漏历史登记记录。以后移动程序时一并保留 `portable-mode.txt` 和 `data`。命令行 `--data-dir` 仍优先于便携模式。
 
 ### macOS
 
@@ -40,15 +42,15 @@ sudo apt-get install libegl1 libopengl0 libnss3 libxkbcommon-x11-0 \
 
 ```powershell
 # Windows
-Get-FileHash .\Hikvision-ASMP-v2.1.0-windows-x86_64.zip -Algorithm SHA256
+Get-FileHash .\Hikvision-ASMP-v2.2.0-windows-x86_64.zip -Algorithm SHA256
 ```
 
 ```bash
 # Linux
-sha256sum Hikvision-ASMP-v2.1.0-linux-x86_64.tar.gz
+sha256sum Hikvision-ASMP-v2.2.0-linux-x86_64.tar.gz
 
 # macOS：替换为已下载的实际文件名
-shasum -a 256 Hikvision-ASMP-v2.1.0-macos-arm64.zip
+shasum -a 256 Hikvision-ASMP-v2.2.0-macos-arm64.zip
 ```
 
 ## 从源码运行
@@ -80,6 +82,7 @@ bash Start-Submit.sh
 - 登录官网后等待“登录有效”。令牌失效时重新登录，不需要打开 F12。
 - 提交前可以用“仅查询资料”检查设备；该按钮不创建维修登记。
 - 程序提示已在运行时，使用现有窗口，或先关闭旧窗口。同一个数据目录只允许一个实例。
+- 提示无法创建锁文件时，检查数据目录的写入权限或磁盘空间；这与程序已在运行是不同的错误。可使用 `--data-dir` 或上述便携模式选择可写目录。
 - 数据和日志保存在系统用户目录，详见 [迁移与备份](migration.md)。
 - 官网加载失败时先检查访问 `https://asmp.hikvision.com/sr/` 的网络条件，再点击重新载入。网页接口或认证流程改变时可能需要更新软件。
 - 记录为“待核对”时先查官网历史数据，不直接重试。

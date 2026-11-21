@@ -5,7 +5,7 @@ from threading import Event
 from typing import Callable
 from uuid import uuid4
 
-from .api import ApiClient, AuthenticationExpired, BusinessRejected, RequestUncertain
+from .api import ApiClient, AuthenticationExpired, BusinessRejected, RequestUncertain, SecurityBlocked
 from .journal import Journal, RecordBlocked
 from .models import Settings, UserError, build_payload, parse_serials, validate_account
 
@@ -69,7 +69,7 @@ class BatchEngine:
                 on_item(ItemResult(serial, "querying", message="正在查询产品资料"))
                 try:
                     data = api.query(serial)
-                except (AuthenticationExpired, BusinessRejected, RequestUncertain) as error:
+                except (AuthenticationExpired, BusinessRejected, RequestUncertain, SecurityBlocked) as error:
                     message = api.safe(str(error))
                     auth = isinstance(error, AuthenticationExpired)
                     if not query_only:
@@ -82,7 +82,7 @@ class BatchEngine:
                         summary.stopped = True
                         summary.reason = message
                         break
-                    if stop.wait(settings.delay_ms / 1000):
+                    if summary.processed < summary.total and stop.wait(settings.delay_ms / 1000):
                         summary.stopped = True
                         break
                     continue
@@ -131,6 +131,14 @@ class BatchEngine:
                                 self.journal.finish(attempt_id, "rejected", message)
                                 summary.failed += 1
                                 on_item(ItemResult(serial, "rejected", model, message, data))
+                            except SecurityBlocked as error:
+                                # The gateway refused the request; do not assume it reached ASMP.
+                                message = api.safe(str(error))
+                                self.journal.finish(attempt_id, "unknown", message)
+                                summary.failed += 1
+                                summary.stopped = True
+                                summary.reason = message
+                                on_item(ItemResult(serial, "unknown", model, message, data))
                             except Exception:
                                 # A sent POST is never replayed, even after an unexpected failure.
                                 message = "提交结果待核对，请先查看官网历史数据，禁止直接重试"
@@ -147,7 +155,7 @@ class BatchEngine:
                 on_progress(summary.processed, summary.total)
                 if summary.stopped:
                     break
-                if stop.wait(settings.delay_ms / 1000):
+                if summary.processed < summary.total and stop.wait(settings.delay_ms / 1000):
                     summary.stopped = True
                     break
         return summary

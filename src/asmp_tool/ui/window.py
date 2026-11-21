@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -14,11 +15,14 @@ from PySide6.QtWidgets import (
 )
 
 from .. import __version__
-from ..api import ApiClient, AuthenticationExpired
+from ..api import ApiClient, AuthenticationExpired, SecurityBlocked
 from ..config import ConfigStore, atomic_json
 from ..engine import BatchEngine, ItemResult, Summary
 from ..journal import Journal, STATE_LABELS
-from ..models import DEAL_OPTIONS, FAULT_OPTIONS, REPAIR_OPTIONS, RETURN_OPTIONS, Settings, UserError, display_time, parse_serials, validate_token
+from ..models import (
+    CLIENT_HISTORY_LIMIT, DEAL_OPTIONS, FAULT_OPTIONS, REPAIR_OPTIONS, RETURN_OPTIONS,
+    Settings, UserError, display_time, parse_serials, validate_token,
+)
 from .login import LoginDialog
 from .worker import TaskWorker
 
@@ -66,6 +70,8 @@ class MainWindow(QMainWindow):
         self._rows: dict[str, int] = {}
         self._history = []
         self._description_history = set()
+        self._client_history = settings.repair_client_history
+        self._committed_client = settings.repair_client.strip()
         self._saved_settings = settings if config.path.exists() else None
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
@@ -126,7 +132,27 @@ class MainWindow(QMainWindow):
         self.settings_group = QGroupBox("登记设置")
         self.settings_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         grid = QGridLayout(self.settings_group)
-        self.client_edit = QLineEdit(settings.repair_client)
+        self.client_combo = QComboBox()
+        self.client_combo.setEditable(True)
+        self.client_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.client_combo.setMaxVisibleItems(12)
+        self.client_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.client_combo.setToolTip("选择历史客户后，请核对联系人、电话和退回地址。")
+        self.client_edit = self.client_combo.lineEdit()
+        self.client_edit.setMaxLength(4000)
+        self.client_edit.setPlaceholderText("输入客户名称或选择历史")
+        self.client_combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+        self.delete_client_button = QPushButton("删除历史")
+        self.delete_client_button.setToolTip("删除当前客户的历史建议，保留表单中的名称。")
+        self.delete_client_button.clicked.connect(self.delete_client)
+        self.client_combo.currentTextChanged.connect(self._update_client_delete)
+        self.client_edit.setText(settings.repair_client)
+        self._refresh_clients()
+        self.client_edit.editingFinished.connect(self._remember_client)
+        self.client_combo.textActivated.connect(self._select_client)
+        client_row = QHBoxLayout()
+        client_row.addWidget(self.client_combo, 1)
+        client_row.addWidget(self.delete_client_button)
         self.contact_edit = QLineEdit(settings.linkman)
         self.phone_edit = QLineEdit(settings.linknumber)
         self.fault_combo = QComboBox()
@@ -170,13 +196,17 @@ class MainWindow(QMainWindow):
         self.delay_spin.setValue(settings.delay_ms)
         self.skip_checkbox = QCheckBox("跳过以前已成功登记的序列号（待核对记录始终跳过）")
         self.skip_checkbox.setChecked(settings.skip_success)
-        fields = [("送修客户", self.client_edit, 0, 0), ("联系人", self.contact_edit, 0, 2),
+        fields = [("联系人", self.contact_edit, 0, 2),
                   ("联系电话", self.phone_edit, 0, 4), ("客户反馈故障", self.fault_combo, 1, 0),
                   ("处理方式", self.deal_combo, 2, 0), ("接修方式", self.repair_combo, 2, 2),
                   ("返回方式 *", self.return_combo, 2, 4)]
         for label, widget, row, column in fields:
             grid.addWidget(QLabel(label), row, column)
             grid.addWidget(widget, row, column + 1)
+        client_label = QLabel("送修客户")
+        client_label.setBuddy(self.client_combo)
+        grid.addWidget(client_label, 0, 0)
+        grid.addLayout(client_row, 0, 1)
         grid.addWidget(QLabel("故障描述"), 1, 2)
         grid.addLayout(description_row, 1, 3, 1, 3)
         self.return_address_panel = QWidget()
@@ -210,8 +240,10 @@ class MainWindow(QMainWindow):
         self.return_combo.currentIndexChanged.connect(
             lambda: self.return_address_panel.setVisible(self.return_combo.currentData() == "0"))
         self.return_combo.activated.connect(self._return_selected)
-        self.province_combo.activated.connect(lambda: self._region_selected(1))
-        self.city_combo.activated.connect(lambda: self._region_selected(2))
+        self.province_combo.currentIndexChanged.connect(lambda: self._clear_subregions(1))
+        self.city_combo.currentIndexChanged.connect(lambda: self._clear_subregions(2))
+        self.province_combo.activated.connect(lambda: self._load_missing_subregions(1))
+        self.city_combo.activated.connect(lambda: self._load_missing_subregions(2))
         grid.addWidget(QLabel("请求间隔"), 4, 0)
         grid.addWidget(self.delay_spin, 4, 1)
         grid.addWidget(self.skip_checkbox, 4, 2, 1, 4)
@@ -342,6 +374,7 @@ class MainWindow(QMainWindow):
             return_mode=self.return_combo.currentData(), province=self.province_combo.currentText(),
             city=self.city_combo.currentText(), area=self.area_combo.currentText(),
             address=self.address_edit.text().strip(),
+            repair_client_history=self._client_history,
         )
 
     def _connect_autosave(self):
@@ -357,9 +390,16 @@ class MainWindow(QMainWindow):
         self.settings_status.setText("设置已修改，正在自动保存…")
         self._save_timer.start()
 
-    def _persist_settings(self):
+    def _persist_settings(self, *, remember_client=False, delete_client=False):
         self._save_timer.stop()
         settings = self.settings()
+        name = settings.repair_client
+        history = self._client_history
+        if delete_client:
+            history = tuple(saved for saved in history if saved != name)
+        elif remember_client and name and name != self._committed_client:
+            history = (name, *(saved for saved in history if saved != name))[:CLIENT_HISTORY_LIMIT]
+        settings = replace(settings, repair_client_history=history)
         try:
             if settings != self._saved_settings or not self.config_store.path.exists():
                 self.config_store.save(settings)
@@ -367,6 +407,11 @@ class MainWindow(QMainWindow):
         except UserError:
             self.settings_status.setText("设置保存失败，请检查数据目录或点击“保存设置”重试")
             raise
+        if remember_client or delete_client:
+            self._committed_client = name
+        if history != self._client_history:
+            self._client_history = history
+            self._refresh_clients()
         self.settings_status.setText("设置已自动保存到本机，下次启动自动恢复")
 
     def _autosave_settings(self):
@@ -377,8 +422,41 @@ class MainWindow(QMainWindow):
 
     def save_settings(self):
         try:
-            self._persist_settings()
+            self._persist_settings(remember_client=True)
             self.log("设置已保存，登录令牌不会写入配置。")
+        except UserError as error:
+            self._job_error(str(error), False)
+
+    def _remember_client(self):
+        if self._busy or self.client_combo.view().isVisible():
+            return
+        try:
+            self._persist_settings(remember_client=True)
+        except UserError as error:
+            self._job_error(str(error), False)
+
+    def _select_client(self, name):
+        self.client_combo.setEditText(name)
+        self._remember_client()
+
+    def _refresh_clients(self):
+        text = self.client_edit.text()
+        cursor = self.client_edit.cursorPosition()
+        with QSignalBlocker(self.client_combo), QSignalBlocker(self.client_edit):
+            self.client_combo.clear()
+            self.client_combo.addItems(self._client_history)
+            self.client_combo.setCurrentIndex(self.client_combo.findText(text))
+            self.client_combo.setEditText(text)
+            self.client_edit.setCursorPosition(cursor)
+        self._update_client_delete()
+
+    def _update_client_delete(self, *_args):
+        self.delete_client_button.setEnabled(self.client_edit.text().strip() in self._client_history)
+
+    def delete_client(self):
+        try:
+            self._persist_settings(delete_client=True)
+            self.status_label.setText("已删除该客户的历史建议。")
         except UserError as error:
             self._job_error(str(error), False)
 
@@ -420,10 +498,14 @@ class MainWindow(QMainWindow):
         if self.return_combo.currentData() == "0" and self.token_edit.text().strip():
             self.load_regions()
 
-    def _region_selected(self, start):
+    def _clear_subregions(self, start):
         for combo in (self.province_combo, self.city_combo, self.area_combo)[start:]:
-            combo.clear()
-        self.load_regions(start)
+            with QSignalBlocker(combo):
+                combo.clear()
+
+    def _load_missing_subregions(self, start):
+        if not (self.province_combo, self.city_combo, self.area_combo)[start].count():
+            self.load_regions(start)
 
     def load_regions(self, start=0):
         if self._busy:
@@ -595,6 +677,8 @@ class MainWindow(QMainWindow):
                 info = api.login_info()
                 try:
                     faults = api.fault_options()
+                except (AuthenticationExpired, SecurityBlocked):
+                    raise
                 except UserError:
                     faults = []
                 return info, faults
@@ -623,7 +707,7 @@ class MainWindow(QMainWindow):
                 raise UserError("请先粘贴序列号")
             settings = self.settings()
             settings.validate(required=not query_only)
-            self._persist_settings()
+            self._persist_settings(remember_client=True)
         except UserError as error:
             self._job_error(str(error), False)
             return
@@ -741,7 +825,7 @@ class MainWindow(QMainWindow):
         if self._login_dialog is not None:
             self._login_dialog.reject()
         try:
-            self._persist_settings()
+            self._persist_settings(remember_client=True)
         except UserError as error:
             QMessageBox.warning(self, "设置未保存", str(error))
             event.ignore()

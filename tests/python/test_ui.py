@@ -6,7 +6,7 @@ import pytest
 from PySide6.QtTest import QTest
 from PySide6.QtCore import Qt
 
-from asmp_tool.api import ApiClient
+from asmp_tool.api import ApiClient, AuthenticationExpired
 from asmp_tool.config import ConfigStore
 from asmp_tool.journal import Journal
 from asmp_tool.models import UserError
@@ -70,6 +70,18 @@ def test_auth_worker_updates_ui_and_only_boolean_diagnostics(window, qapp):
     diag = json.loads((view.config_store.directory / "diagnostics.json").read_text())
     assert diag == {"authenticated": True}
     assert len(calls) == 2
+
+
+def test_logout_during_fault_option_load_invalidates_login(window, qapp, monkeypatch):
+    view, _ = window
+
+    def expired(_api):
+        raise AuthenticationExpired("登录已失效")
+
+    monkeypatch.setattr(ApiClient, "fault_options", expired)
+    view.check_button.click()
+    wait_done(view, qapp)
+    assert view.auth_status.text() == "登录已失效" and not view.token_edit.text()
 
 
 def test_query_and_submit_table_and_history(window, qapp):
@@ -136,10 +148,8 @@ def test_form_autosaves_without_query_or_submit_and_restores(window, qapp):
     view.deal_combo.setCurrentIndex(view.deal_combo.findData("0"))
     view.repair_combo.setCurrentIndex(view.repair_combo.findData("1"))
     view.return_combo.setCurrentIndex(view.return_combo.findData("0"))
-    view.province_combo.addItem("测试省")
-    view.city_combo.addItem("测试市")
-    view.area_combo.addItem("测试区")
-    for combo in (view.province_combo, view.city_combo, view.area_combo):
+    for combo, name in [(view.province_combo, "测试省"), (view.city_combo, "测试市"), (view.area_combo, "测试区")]:
+        combo.addItem(name)
         combo.setCurrentIndex(0)
     view.address_edit.setText("测试街道1号")
     view.delay_spin.setValue(321)
@@ -187,6 +197,45 @@ def test_autosave_failure_is_visible_and_can_retry(window, monkeypatch):
     assert "已自动保存" in view.settings_status.text()
 
 
+def test_repair_client_dropdown_remembers_finished_edits_and_deletes_history(window, qapp):
+    view, calls = window
+    view.client_edit.setFocus()
+    view.client_edit.setText("客户")
+    QTest.qWait(900)
+    assert view.config_store.load()[0].repair_client == "客户"
+    assert view.client_combo.count() == 0  # Pausing mid-entry only saves the draft text.
+    view.client_edit.setText("客户甲")
+    QTest.keyClick(view.client_edit, Qt.Key.Key_Return)
+    view.client_edit.setText("客户乙")
+    QTest.keyClick(view.client_edit, Qt.Key.Key_Return)
+    assert view.config_store.load()[0].repair_client_history == ("客户乙", "客户甲")
+
+    # Select an older value through the actual popup and verify it moves to the top.
+    view.client_combo.showPopup()
+    qapp.processEvents()
+    view.client_combo.view().setCurrentIndex(view.client_combo.model().index(1, 0))
+    QTest.keyClick(view.client_combo.view(), Qt.Key.Key_Return)
+    assert view.client_edit.text() == "客户甲"
+    assert view.config_store.load()[0].repair_client_history == ("客户甲", "客户乙")
+    assert view.contact_edit.text() and view.phone_edit.text()
+
+    view.delete_client_button.click()
+    assert view.client_edit.text() == "客户甲"
+    assert view.client_combo.findText("客户甲") == -1
+    view.close()
+    restored, token = view.config_store.load()
+    assert restored.repair_client == "客户甲"
+    assert restored.repair_client_history == ("客户乙",) and token == "" and not calls
+    reopened = MainWindow(view.config_store, view.journal, restored)
+    try:
+        assert reopened.client_combo.itemText(0) == "客户乙"
+        assert reopened.client_combo.currentText() == "客户甲"
+        assert not reopened.delete_client_button.isEnabled()
+    finally:
+        reopened.close()
+        reopened.deleteLater()
+
+
 def test_description_dropdown_sort_delete_and_submit_plain_text(window, qapp):
     view, _ = window
     for serial, text in enumerate(["无图像", "无图像", "频繁重启"]):
@@ -228,6 +277,9 @@ def test_customer_return_cascades_address_and_submits_selected_value(window, qap
     select_region(view.city_combo, 0, view, qapp)
     view.area_combo.setCurrentIndex(0)
     view.address_edit.setText("测试街道1号")
+    select_region(view.province_combo, 0, view, qapp)
+    select_region(view.city_combo, 0, view, qapp)
+    assert view.city_combo.currentText() == "测试市" and view.area_combo.currentText() == "测试区"
     view.serial_edit.setPlainText("CUSTOMER")
     view.submit_button.click()
     wait_done(view, qapp)
@@ -268,6 +320,7 @@ def test_customer_return_incomplete_address_never_starts_submission(window):
 
 def test_region_failure_cannot_retain_children_of_old_province(window, qapp, monkeypatch):
     view, _ = window
+    view.province_combo.addItem("原省", "P1")
     view.province_combo.addItem("另一省", "P2")
     view.province_combo.setCurrentIndex(0)
     view.city_combo.addItem("旧城市", "OLD-C")
@@ -277,7 +330,7 @@ def test_region_failure_cannot_retain_children_of_old_province(window, qapp, mon
     def fail(_self, *_args):
         raise UserError("地址加载失败，请重试")
     monkeypatch.setattr(ApiClient, "regions", fail)
-    select_region(view.province_combo, 0, view, qapp)
+    select_region(view.province_combo, 1, view, qapp)
     assert "加载失败" in view.last_error
     assert not view.city_combo.currentText() and not view.area_combo.currentText()
 

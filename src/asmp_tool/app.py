@@ -14,6 +14,30 @@ from .config import ConfigStore, application_directory, atomic_json, default_dat
 from .journal import Journal
 from .models import UserError
 
+LOGIN_FORM_PROBE = """
+(() => {
+    const shown = input => input.getClientRects().length > 0 &&
+        getComputedStyle(input).visibility === 'visible';
+    const inputs = Array.from(document.querySelectorAll('input'));
+    return {
+        url: location.href,
+        hasLoginFields: inputs.some(input => input.type === 'password' && shown(input)) &&
+            inputs.some(input => ['text', 'email', 'tel'].includes(input.type) && shown(input))
+    };
+})()
+"""
+
+
+def acquire_instance_lock(data_dir: Path) -> QLockFile:
+    lock = QLockFile(str(data_dir / "app.lock"))
+    if lock.tryLock(0):
+        return lock
+    if lock.error() == QLockFile.LockError.LockFailedError:
+        raise UserError("此数据目录的程序已在运行，请使用已打开的窗口")
+    if lock.error() == QLockFile.LockError.PermissionError:
+        raise UserError("无法在数据目录创建锁文件，请检查写入权限，或使用 --data-dir 指定可写的数据目录")
+    raise UserError("无法创建数据目录的锁文件，请检查磁盘空间和文件系统状态")
+
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="海康 ASMP 跨平台批量登记工具")
@@ -42,9 +66,7 @@ def main(argv=None) -> int:
     lock = None
     try:
         data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        lock = QLockFile(str(data_dir / "app.lock"))
-        if not lock.tryLock(0):
-            raise UserError("此数据目录的程序已在运行，请使用已打开的窗口")
+        lock = acquire_instance_lock(data_dir)
         config = ConfigStore(data_dir, legacy_dir)
         settings, token = config.load()
         journal = Journal(data_dir / "submit_records.sqlite3")
@@ -86,6 +108,7 @@ def main(argv=None) -> int:
                 def loaded(ok):
                     if not ok:
                         result["exit"] = 1
+                        print("SMOKE_FAILED: offline renderer could not load the test page", file=sys.stderr, flush=True)
                     else:
                         atomic_json(data_dir / "smoke-result.json", {"ui": True, "webengine": True, "version": __version__})
                         print("UI_AND_WEBENGINE_SMOKE_OK", flush=True)
@@ -94,6 +117,8 @@ def main(argv=None) -> int:
                     profile.deleteLater()
                     window.close()
                 view.loadFinished.connect(loaded)
+                page.renderProcessTerminated.connect(
+                    lambda status, code: print(f"RENDERER_TERMINATED: {status.name} ({code})", file=sys.stderr, flush=True))
                 view.setHtml("<!doctype html><title>ASMP offline smoke</title><p>Offline renderer check</p>")
                 return
             except Exception as error:
@@ -107,24 +132,49 @@ def main(argv=None) -> int:
             window.close()
         QTimer.singleShot(45000, timed_out)
     elif args.browser_smoke:
+        from .ui.login import official_url
+
         timer = QTimer(app)
         clock = QElapsedTimer()
         clock.start()
         window.show_login()
         dialog = window._login_dialog
-        def check_browser():
-            if not dialog._disposed and dialog.page.title() and dialog.view.url().toString().startswith("https://asmp.hikvision.com/sr/"):
-                print("BROWSER_SMOKE_OK: official page loaded in off-the-record QtWebEngine", flush=True)
-                atomic_json(data_dir / "smoke-result.json", {"official_page": True, "version": __version__})
-            elif clock.elapsed() < 45000:
-                return
-            else:
-                result["exit"] = 1
-                print("BROWSER_SMOKE_FAILED: official page did not load within 45 seconds", file=sys.stderr, flush=True)
+        checking = False
+
+        def finish_browser(ok, detail):
             timer.stop()
-            if not dialog._disposed:
-                dialog.reject()
-            window.close()
+            result["exit"] = 0 if ok else 1
+            print(detail, file=sys.stdout if ok else sys.stderr, flush=True)
+            try:
+                atomic_json(data_dir / "smoke-result.json", {"official_page": ok, "version": __version__})
+            except UserError as error:
+                result["exit"] = 1
+                print(str(error), file=sys.stderr, flush=True)
+            finally:
+                if not dialog._disposed:
+                    dialog.reject()
+                window.close()
+
+        def on_form_probe(probe):
+            nonlocal checking
+            checking = False
+            if timer.isActive() and isinstance(probe, dict):
+                url = probe.get("url", "")
+                if official_url(url) and url.startswith("https://asmp.hikvision.com/sr/") and probe.get("hasLoginFields") is True:
+                    finish_browser(True, "BROWSER_SMOKE_OK: verified visible fields on the official ASMP login page")
+
+        def check_browser():
+            nonlocal checking
+            if dialog._disposed:
+                finish_browser(False, "BROWSER_SMOKE_FAILED: the login window was closed")
+            elif dialog.renderer_error:
+                status, code = dialog.renderer_error
+                finish_browser(False, f"BROWSER_SMOKE_FAILED: renderer {status} ({code})")
+            elif clock.elapsed() >= 45000:
+                finish_browser(False, "BROWSER_SMOKE_FAILED: official login form was not visible within 45 seconds")
+            elif dialog.page_loaded and not checking and official_url(dialog.view.url().toString()):
+                checking = True
+                dialog.page.runJavaScript(LOGIN_FORM_PROBE, on_form_probe)
         timer.timeout.connect(check_browser)
         timer.start(500)
     elif args.login:

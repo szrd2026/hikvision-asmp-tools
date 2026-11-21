@@ -7,9 +7,15 @@ import httpx
 
 from .models import API_BASE, ORIGIN, TOKEN_COOKIE, UserError, validate_token
 
+SECURITY_BLOCK = re.compile(r"禁止使用|安全红线|AI\s*工具|数据拉取|安全策略", re.I)
+
 
 class AuthenticationExpired(UserError):
     pass
+
+
+class SecurityBlocked(UserError):
+    """The server's security gateway refused the request; the login may still be valid."""
 
 
 class RequestUncertain(UserError):
@@ -32,7 +38,11 @@ class ApiClient:
         self.client = httpx.Client(
             timeout=httpx.Timeout(90.0, connect=20.0), follow_redirects=False,
             transport=transport,
-            headers={"accessToken": self.token, "Origin": ORIGIN, "Referer": ORIGIN + "/sr/"},
+            headers={
+                "accessToken": self.token, "Origin": ORIGIN, "Referer": ORIGIN + "/sr/",
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            },
         )
         self.client.cookies.set(TOKEN_COOKIE, self.token, domain="asmp.hikvision.com", path="/")
 
@@ -59,7 +69,14 @@ class ApiClient:
         except (ValueError, UnicodeError):
             body = None
         code = body.get("code") if isinstance(body, dict) else None
-        msg = self.safe(body.get("msg") or "") if isinstance(body, dict) else ""
+        raw_message = ""
+        if isinstance(body, dict):
+            raw_message = str(body.get("msg") or body.get("message") or "")
+        msg = self.safe(raw_message)
+        if response.status_code == 403:
+            detail = msg or self.safe(response.text)
+            if SECURITY_BLOCK.search(detail):
+                raise SecurityBlocked(f"服务器安全策略拦截：{detail}")
         if response.status_code in (401, 403) or code in ("003", "013") or re.search(r"notLogin|未登录|登录失效|登录过期|重新登录", msg, re.I):
             raise AuthenticationExpired("登录已失效，请重新通过官方网页登录")
         if not 200 <= response.status_code < 300:

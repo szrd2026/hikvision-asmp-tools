@@ -6,7 +6,7 @@ from dataclasses import replace
 
 import pytest
 
-from asmp_tool.config import ConfigStore
+from asmp_tool.config import ConfigStore, atomic_json
 from asmp_tool.journal import Journal, JournalError, RecordBlocked
 from asmp_tool.models import UserError
 
@@ -46,6 +46,24 @@ def test_corrupt_config_not_overwritten(tmp_path):
     with pytest.raises(UserError):
         ConfigStore(tmp_path).load()
     assert path.read_text() == "BROKEN"
+
+
+def test_client_history_seeds_legacy_name_but_respects_explicit_deletion(tmp_path, settings):
+    store = ConfigStore(tmp_path)
+    old_config = settings.to_dict()
+    old_config.pop("repairClientHistory")
+    atomic_json(store.path, old_config)
+    loaded, _ = store.load()
+    assert loaded.repair_client_history == (settings.repair_client,)
+    store.save(replace(loaded, repair_client_history=()))
+    assert store.load()[0].repair_client_history == ()
+
+
+def test_config_parent_write_error_uses_user_error(tmp_path):
+    parent = tmp_path / "blocked"
+    parent.write_text("not a directory")
+    with pytest.raises(UserError, match="无法保存配置"):
+        atomic_json(parent / "settings.json", {})
 
 
 def test_intent_survives_reopen_and_always_blocks(tmp_path):

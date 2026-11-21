@@ -5,7 +5,7 @@ from threading import Event
 import httpx
 import pytest
 
-from asmp_tool.api import ApiClient, AuthenticationExpired, BusinessRejected, RequestUncertain
+from asmp_tool.api import ApiClient, AuthenticationExpired, BusinessRejected, RequestUncertain, SecurityBlocked
 from asmp_tool.engine import BatchEngine
 from asmp_tool.journal import Journal, JournalError
 from asmp_tool.models import UserError
@@ -41,6 +41,15 @@ def test_headers_cookie_and_json_encoding():
         return response(request, body={"code": "000", "data": {"productModel": "DS"}})
     with ApiClient(TOKEN, transport=httpx.MockTransport(handler)) as api:
         assert api.query('A"B')["productModel"] == "DS"
+
+
+def test_gateway_security_block_is_not_reported_as_expired_login():
+    body = {"code": 403, "message": "禁止使用 AI 工具操作或数据拉取，请立即停止尝试"}
+    with ApiClient(TOKEN, transport=httpx.MockTransport(lambda req: response(req, 403, body))) as api:
+        with pytest.raises(SecurityBlocked) as caught:
+            api.login_info()
+    assert "安全策略" in str(caught.value)
+    assert "登录已失效" not in str(caught.value)
 
 
 def test_no_credential_redirect_or_automatic_retry():
@@ -133,6 +142,25 @@ def test_query_only_never_submits_or_creates_journal(tmp_path, settings, account
     assert result.queried == 2 and not journal.records()
     assert not any(path.endswith("setNewRma") for path in calls)
     assert journal.fault_descriptions() == []
+
+
+def test_delay_is_only_between_requests(tmp_path, settings, account):
+    class StopProbe(Event):
+        def __init__(self):
+            super().__init__()
+            self.delays = []
+
+        def wait(self, timeout=None):
+            self.delays.append(timeout)
+            return False
+
+    journal = Journal(tmp_path / "db")
+    stop = StopProbe()
+    summary = BatchEngine(journal, factory_for(journal, account, [])).run(
+        "A\nB", TOKEN, replace(settings, delay_ms=500), stop, query_only=True,
+    )
+    assert summary.queried == 2 and not summary.stopped
+    assert stop.delays == [0.5]
 
 
 def test_stop_during_query_prevents_submit(tmp_path, settings, account):

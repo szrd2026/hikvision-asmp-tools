@@ -15,6 +15,7 @@ FAULT_OPTIONS = ["无图像", "不断重启", "搜索不到", "硬盘/SD卡故�
 DEAL_OPTIONS = {"0": "维修", "1": "一年包换", "2": "本地服务"}
 REPAIR_OPTIONS = {"0": "送修", "1": "上门取件", "2": "寄修"}
 RETURN_OPTIONS = {"1": "寄回送修点", "0": "寄回客户"}
+CLIENT_HISTORY_LIMIT = 50
 
 
 class UserError(Exception):
@@ -47,6 +48,7 @@ class Settings:
     city: str = ""
     area: str = ""
     address: str = ""
+    repair_client_history: tuple[str, ...] = ()
 
     def validate(self, *, required: bool = True) -> None:
         for name, value in [("送修客户", self.repair_client), ("联系人", self.linkman),
@@ -83,8 +85,22 @@ class Settings:
             raw_delay = data.get("delay", 500)
             if isinstance(raw_delay, bool) or not re.fullmatch(r"\d+", str(raw_delay)):
                 raise ValueError
+            client = data.get("repairClient", "")
+            # An explicit empty list means the user cleared the suggestions.
+            raw_history = data.get("repairClientHistory", [client])
+            history = {}
+            if isinstance(raw_history, list):
+                for entry in raw_history:
+                    if not isinstance(entry, str):
+                        continue
+                    name = entry.strip()
+                    if not name or len(name) > 4000 or any(ord(char) < 32 for char in name):
+                        continue
+                    history[name] = None
+                    if len(history) == CLIENT_HISTORY_LIMIT:
+                        break
             settings = cls(
-                repair_client=data.get("repairClient", ""), linkman=data.get("linkman", ""),
+                repair_client=client, linkman=data.get("linkman", ""),
                 linknumber=data.get("linknumber", ""), reback_fault=data.get("rebackFault", "其他"),
                 fault_text=data.get("rebackFaulttext", ""), deal_type=str(data.get("dealType", "2")),
                 repair_mode=str(data.get("repairMode", "2")), delay_ms=int(raw_delay),
@@ -92,6 +108,7 @@ class Settings:
                 return_mode=str(data.get("isSend", "1")),
                 province=data.get("province", ""), city=data.get("city", ""),
                 area=data.get("area", ""), address=data.get("address", ""),
+                repair_client_history=tuple(history),
             )
             settings.validate(required=False)
             return settings
@@ -106,6 +123,7 @@ class Settings:
             "delay": self.delay_ms, "skip": self.skip_success,
             "isSend": self.return_mode, "province": self.province, "city": self.city,
             "area": self.area, "address": self.address,
+            "repairClientHistory": list(self.repair_client_history),
         }
 
 

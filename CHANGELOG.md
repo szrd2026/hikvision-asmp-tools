@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-11-21
+
+- Recreate the embedded browser page on retry after renderer termination and report the failure separately from network errors.
+- Offer an official system-browser link and verify rendered login fields in the live smoke check.
+- Report ASMP security policy refusals without treating them as expired sessions.
+- Remember up to 50 recent repair customers in a searchable dropdown with persistent deletion.
+- Preserve the selected city and district when the operator reselects the same parent region.
+- Finish the batch immediately after the last device and report authentication expiry during fault-option loading.
+- Show a settings save error when the configuration directory cannot be created.
+- Distinguish lock-file permission and filesystem errors from an already-running instance.
+- Support an explicit portable-mode marker for native packages with data beside the executable; retain the --data-dir override.
+
 ## [2.1.0] - 2026-10-31
 
 - Expose the previously fixed return method in the form; keep header/detail `isSend` values consistent.
@@ -72,4 +84,5 @@ Local development snapshot; not published as a separate GitHub release.
   a public, versioned API. Endpoint or payload changes on the server side may
   require a client update.
 
+[2.2.0]: https://github.com/szrd2026/hikvision-asmp-tools/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/szrd2026/hikvision-asmp-tools/compare/v2.0.0...v2.1.0

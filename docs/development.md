@@ -68,10 +68,10 @@ python tools/build.py
 
 | 平台 | 输出 |
 | --- | --- |
-| Windows | `Hikvision-ASMP-v2.1.0-windows-x86_64.zip` |
-| Linux | `Hikvision-ASMP-v2.1.0-linux-x86_64.tar.gz` |
-| macOS | `Hikvision-ASMP-v2.1.0-macos-{x86_64,arm64}.zip` |
-| 源码 | `Hikvision-ASMP-v2.1.0-source.zip` |
+| Windows | `Hikvision-ASMP-v2.2.0-windows-x86_64.zip` |
+| Linux | `Hikvision-ASMP-v2.2.0-linux-x86_64.tar.gz` |
+| macOS | `Hikvision-ASMP-v2.2.0-macos-{x86_64,arm64}.zip` |
+| 源码 | `Hikvision-ASMP-v2.2.0-source.zip` |
 
 每个包附独立 `.sha256`。构建目录位于 `build/`，归档位于 `dist/`，均不提交 Git。
 
