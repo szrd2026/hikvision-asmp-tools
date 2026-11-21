@@ -36,7 +36,7 @@ sudo apt-get install libegl1 libopengl0 libnss3 libxkbcommon-x11-0 \
   libxdamage1 libxrandr2 libxtst6 libasound2 libpulse0 libgbm1 fonts-noto-cjk
 ```
 
-应用使用 QtWebEngine 默认沙箱，不自动修改系统安全设置。Linux ARM 暂不提供原生构建任务。
+Linux ARM 暂不提供原生构建任务。
 
 ## 校验下载
 
@@ -81,10 +81,10 @@ bash Start-Submit.sh
 
 ## 首次使用与常见问题
 
-- 登录官网后等待“登录有效”。令牌失效时重新登录，不需要打开 F12。
+- 在系统浏览器登录官网，粘贴当前会话的 `asmp_sr_token` 值，然后点击“检查登录”。令牌失效时重新登录并粘贴新令牌。
 - 提交前可以用“仅查询资料”检查设备；该按钮不创建维修登记。
 - 程序提示已在运行时，使用现有窗口，或先关闭旧窗口。同一个数据目录只允许一个实例。
 - 提示无法创建锁文件时，检查数据目录的写入权限或磁盘空间；这与程序已在运行是不同的错误。可使用 `--data-dir` 或上述便携模式选择可写目录。
 - 数据和日志保存在系统用户目录，详见 [迁移与备份](migration.md)。
-- 官网加载失败时先检查访问 `https://asmp.hikvision.com/sr/` 的网络条件，再点击重新载入。网页接口或认证流程改变时可能需要更新软件。
+- 官网或接口访问受限时，按官网页面提示处理。
 - 记录为“待核对”时先查官网历史数据，不直接重试。

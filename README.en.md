@@ -4,15 +4,15 @@
 
 [中文](README.md) · [Downloads](https://github.com/szrd2026/hikvision-asmp-tools/releases/latest) · [Build status](https://github.com/szrd2026/hikvision-asmp-tools/actions/workflows/build.yml)
 
-Version 2.0 replaces the Windows PowerShell/WinForms application with Python, PySide6, QtWebEngine and SQLite. Windows, Linux and macOS share the same application code. The interface is currently Chinese.
+Version 2.2 uses Python, PySide6 Essentials and SQLite across Windows, Linux and macOS. It accepts an ASMP session token pasted manually. The interface is currently Chinese.
 
 This is an unofficial project, not affiliated with or endorsed by Hikvision. Use an ASMP account you are authorized to operate.
 
-![Python 2.1 interface with no real account or device data](docs/screenshot-python.png)
+![Python 2.2 interface with no real account or device data](docs/screenshot-python.png)
 
 ## Features
 
-- Sign in through the official ASMP page in a separate, in-memory browser session. The application reads the session cookie without collecting the account password.
+- Open the official ASMP portal in your system browser and paste your own session token for the current application session.
 - Query product models and warranty information without creating registrations.
 - Paste a serial-number column from Excel/WPS, deduplicate the batch and submit one registration per serial.
 - Select return to the collecting point or return to the customer; customer returns require province, city, district and street address. Region choices load from the official API.
@@ -37,7 +37,7 @@ Only completed builds are listed as release assets. Packages do not carry a main
 
 ## Use
 
-1. Click **官方网页登录** and sign in on `asmp.hikvision.com`.
+1. Click **在浏览器打开官网** and sign in on `asmp.hikvision.com`. Paste the value of your current session's `asmp_sr_token`, then click **检查登录**.
 2. Enter the repair customer, contact and fault settings. Confirm **返回方式**; for **寄回客户**, use **加载省市区** to select the region and enter a full address.
 3. Paste only the serial-number column.
 4. Use **仅查询资料** for a read-only lookup.
@@ -72,7 +72,7 @@ python run.py --smoke-test
 python tools/build.py
 ```
 
-Tests use mocked HTTP requests. Native builds verify the frozen UI and an offline Chromium page. Windows sign-in and real-device read-only lookup have been checked; actual repair registration has not been exercised with production data. CI success does not establish live-portal compatibility on every target.
+Tests use mocked HTTP requests to verify pasted-token checks, serial lookup and registration behavior. Native builds verify the packaged window and masked token input. These checks do not create actual repair registrations.
 
 See the Chinese [installation](docs/installation.md), [migration](docs/migration.md) and [development](docs/development.md) guides. The original Windows implementation is archived under `legacy/powershell/` and excluded from Python packages.
 

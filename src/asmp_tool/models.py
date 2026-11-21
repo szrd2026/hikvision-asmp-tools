@@ -135,9 +135,9 @@ class Session:
 def validate_token(token: str) -> str:
     token = token.strip()
     if not token:
-        raise UserError("请先登录或粘贴登录令牌")
+        raise UserError("请先粘贴 ASMP 登录令牌")
     if len(token) > 16384 or any(ord(c) < 33 or ord(c) > 126 or c in ';,"\\' for c in token):
-        raise UserError("令牌格式无效，请重新通过官方网页登录获取")
+        raise UserError("令牌格式无效，请粘贴 asmp_sr_token 的值")
     return token
 
 

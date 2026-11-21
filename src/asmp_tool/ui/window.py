@@ -20,10 +20,9 @@ from ..config import ConfigStore, atomic_json
 from ..engine import BatchEngine, ItemResult, Summary
 from ..journal import Journal, STATE_LABELS
 from ..models import (
-    CLIENT_HISTORY_LIMIT, DEAL_OPTIONS, FAULT_OPTIONS, REPAIR_OPTIONS, RETURN_OPTIONS,
+    CLIENT_HISTORY_LIMIT, DEAL_OPTIONS, FAULT_OPTIONS, LOGIN_URL, REPAIR_OPTIONS, RETURN_OPTIONS,
     Settings, UserError, display_time, parse_serials, validate_token,
 )
-from .login import LoginDialog
 from .worker import TaskWorker
 
 ITEM_LABELS = dict(STATE_LABELS, querying="查询中", submitting="提交中", queried="已查询", skipped="已跳过", cancelled="已停止")
@@ -63,7 +62,6 @@ class MainWindow(QMainWindow):
         self.diagnostics = diagnostics
         self._thread = None
         self._worker = None
-        self._login_dialog = None
         self._completion = None
         self._busy = False
         self._secrets: set[str] = set()
@@ -93,7 +91,7 @@ class MainWindow(QMainWindow):
         self.refresh_history()
         self.refresh_descriptions()
         self._connect_autosave()
-        self.log("就绪。先登录，再查询资料或提交登记。")
+        self.log("就绪。粘贴 ASMP 登录令牌后可检查登录、查询资料或提交登记。")
 
     def _build_ui(self, settings):
         root = QWidget()
@@ -117,15 +115,17 @@ class MainWindow(QMainWindow):
         login_layout = QHBoxLayout(login_group)
         self.token_edit = QLineEdit()
         self.token_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.token_edit.setPlaceholderText("点击官方网页登录自动获取；也可粘贴令牌，仅本次会话使用")
+        self.token_edit.setPlaceholderText("粘贴 asmp_sr_token 的值，仅本次会话使用")
+        self.token_edit.setAccessibleName("ASMP 登录令牌")
         self.token_edit.textChanged.connect(lambda: self.auth_status.setText("未验证登录"))
-        self.login_button = QPushButton("官方网页登录")
-        self.login_button.setObjectName("primary")
-        self.login_button.clicked.connect(self.show_login)
+        self.portal_button = QPushButton("在浏览器打开官网")
+        self.portal_button.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(LOGIN_URL)))
         self.check_button = QPushButton("检查登录")
-        self.check_button.clicked.connect(lambda: self.check_login())
+        self.check_button.setObjectName("primary")
+        self.check_button.clicked.connect(self.check_login)
+        self.token_edit.returnPressed.connect(self.check_login)
         login_layout.addWidget(self.token_edit, 1)
-        login_layout.addWidget(self.login_button)
+        login_layout.addWidget(self.portal_button)
         login_layout.addWidget(self.check_button)
         layout.addWidget(login_group)
 
@@ -582,7 +582,7 @@ class MainWindow(QMainWindow):
 
     def _set_busy(self, busy):
         self._busy = busy
-        for widget in (self.login_button, self.check_button, self.query_button, self.submit_button,
+        for widget in (self.check_button, self.query_button, self.submit_button,
                        self.save_button, self.token_edit, self.serial_edit, self.settings_group,
                        self.registered_button, self.absent_button):
             widget.setEnabled(not busy)
@@ -641,25 +641,6 @@ class MainWindow(QMainWindow):
         self._set_busy(False)
         self.refresh_history()
         self.refresh_descriptions()
-
-    def show_login(self):
-        if self._busy:
-            return
-        self._set_busy(True)
-        dialog = LoginDialog(self)
-        self._login_dialog = dialog
-        captured = []
-        dialog.token_ready.connect(captured.append)
-        def completed(_result):
-            self._login_dialog = None
-            self._set_busy(False)
-            if captured:
-                self.token_edit.setText(captured[0])
-                self.check_login()
-            else:
-                self.log("已取消官方网页登录。")
-        dialog.finished.connect(completed)
-        dialog.open()
 
     def check_login(self):
         if self._busy:
@@ -822,8 +803,6 @@ class MainWindow(QMainWindow):
             self.request_stop()
             event.ignore()
             return
-        if self._login_dialog is not None:
-            self._login_dialog.reject()
         try:
             self._persist_settings(remember_client=True)
         except UserError as error:

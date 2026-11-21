@@ -3,7 +3,6 @@ from dataclasses import replace
 import pytest
 
 from asmp_tool.models import Settings, Session, UserError, build_payload, display_time, parse_serials, validate_account, validate_token
-from asmp_tool.ui.login import cookie_token, official_url
 
 
 @pytest.mark.parametrize("text,expected", [
@@ -134,26 +133,3 @@ def test_session_never_reprs_secret():
 def test_record_times_use_service_timezone():
     assert display_time("2026-10-31T01:00:00+00:00") == "2026-10-31 09:00:00"
     assert display_time("2026-10-31 09:00:00") == "2026-10-31 09:00:00"
-
-
-@pytest.mark.parametrize("url", ["https://asmp.hikvision.com/sr/#/login", "https://asmp.hikvision.com:443/sr/"])
-def test_official_navigation(url):
-    assert official_url(url)
-
-
-@pytest.mark.parametrize("url", ["http://asmp.hikvision.com/", "https://evil.com/", "https://asmp.hikvision.com.evil.com/",
-                                  "https://evil@asmp.hikvision.com/", "file:///tmp/test", "https://asmp.hikvision.com:444/"])
-def test_official_navigation_restricts_origin(url):
-    assert not official_url(url)
-
-
-@pytest.mark.parametrize("name,domain,path,expected", [
-    ("asmp_sr_token", "asmp.hikvision.com", "/", "TOKEN"),
-    ("asmp_sr_token", ".hikvision.com", "/api", "TOKEN"),
-    ("other", "asmp.hikvision.com", "/", ""),
-    ("asmp_sr_token", "evil.com", "/", ""),
-    ("asmp_sr_token", "asmp.hikvision.com", "/sr/", ""),
-    ("asmp_sr_token", "asmp.hikvision.com", "/api/send", ""),
-])
-def test_cookie_scope(name, domain, path, expected):
-    assert cookie_token(name, "TOKEN", domain, path) == expected

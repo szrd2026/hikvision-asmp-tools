@@ -2,7 +2,7 @@
 import sys
 from pathlib import Path
 
-if ("--smoke-test" in sys.argv or "--browser-smoke" in sys.argv) and "--data-dir" in sys.argv:
+if "--smoke-test" in sys.argv and "--data-dir" in sys.argv:
     index = sys.argv.index("--data-dir") + 1
     if index < len(sys.argv):
         directory = Path(sys.argv[index]).resolve()

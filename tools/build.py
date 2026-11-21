@@ -1,4 +1,4 @@
-"""Build native packages on each target OS, and verify the frozen Qt renderer."""
+"""Build native packages and verify the frozen manual-token UI."""
 from __future__ import annotations
 
 import argparse
@@ -7,7 +7,6 @@ import importlib.metadata
 import json
 import os
 import platform
-import plistlib
 import shutil
 import stat
 import subprocess
@@ -55,7 +54,7 @@ def source_archive(dist):
 
 def collect_licenses(target):
     target.mkdir(parents=True, exist_ok=True)
-    names = ["PySide6", "PySide6_Essentials", "PySide6_Addons", "PySide6_WebEngine", "PySide6_Pdf",
+    names = ["PySide6_Essentials",
              "shiboken6", "httpx", "httpcore", "anyio", "certifi", "idna", "h11", "typing_extensions", "pyinstaller"]
     versions = {}
     for name in names:
@@ -74,32 +73,18 @@ def collect_licenses(target):
     (target / "versions.json").write_text(json.dumps(versions, indent=2) + "\n", encoding="utf-8")
 
 
-def mac_entitlements(build):
-    import PySide6
-    entitlements = {"com.apple.security.cs.allow-jit": True}
-    # Qt specifies that its helper's required entitlements must be retained.
-    for path in Path(PySide6.__file__).parent.rglob("QtWebEngineProcess.entitlements"):
-        with path.open("rb") as stream:
-            entitlements.update(plistlib.load(stream))
-    path = build / "macos.entitlements.plist"
-    with path.open("wb") as stream:
-        plistlib.dump(entitlements, stream)
-    return path
-
-
 def build_environment(build):
     environment = os.environ.copy()
     environment["PYINSTALLER_CONFIG_DIR"] = str(build / "pyinstaller-cache")
     if sys.platform == "win32":
         # A developer's PATH may contain unrelated ICU/Qt DLLs (e.g. Poppler).
         # PyInstaller's resolver must see only the selected Python, Qt and OS runtimes.
-        site = Path(importlib.metadata.distribution("PySide6").locate_file("PySide6"))
+        site = Path(importlib.metadata.distribution("PySide6_Essentials").locate_file("PySide6"))
         windows = Path(environment.get("SystemRoot", r"C:\Windows"))
         paths = [Path(sys.executable).parent, Path(sys.base_prefix), Path(sys.base_prefix) / "DLLs",
                  site, site.parent / "shiboken6", windows / "System32", windows]
         environment["PATH"] = os.pathsep.join(str(path) for path in paths)
-        for variable in ("QT_PLUGIN_PATH", "QML_IMPORT_PATH", "QML2_IMPORT_PATH",
-                         "QTWEBENGINEPROCESS_PATH", "QTWEBENGINE_RESOURCES_PATH", "QTWEBENGINE_LOCALES_PATH"):
+        for variable in ("QT_PLUGIN_PATH", "QML_IMPORT_PATH", "QML2_IMPORT_PATH"):
             environment.pop(variable, None)
     return environment
 
@@ -133,8 +118,7 @@ def main():
                 destination = str(Path(relative).parent)
                 command += ["--add-data", f"{ROOT / relative}{os.pathsep}{destination}"]
         if sys.platform == "darwin":
-            command += ["--osx-bundle-identifier", "com.hikvisionasmp.desktop",
-                        "--osx-entitlements-file", str(mac_entitlements(build))]
+            command += ["--osx-bundle-identifier", "com.hikvisionasmp.desktop"]
             if args.codesign_identity:
                 command += ["--codesign-identity", args.codesign_identity]
         command.append(str(ROOT / "run.py"))
@@ -152,8 +136,8 @@ def main():
         smoke_dir = ROOT / ".tmp" / ("frozen-smoke-" + uuid4().hex)
         subprocess.run([str(executable), "--smoke-test", "--data-dir", str(smoke_dir)], check=True, timeout=100, cwd=ROOT)
         marker = json.loads((smoke_dir / "smoke-result.json").read_text(encoding="utf-8"))
-        if not marker.get("ui") or not marker.get("webengine"):
-            raise RuntimeError("Frozen browser renderer did not pass the smoke test")
+        if not marker.get("ui") or not marker.get("manual_token"):
+            raise RuntimeError("Frozen manual-token UI did not pass the smoke test")
         system = {"win32": "windows", "darwin": "macos"}.get(sys.platform, "linux")
         arch = {"AMD64": "x86_64", "aarch64": "arm64"}.get(platform.machine(), platform.machine())
         base = dist / f"Hikvision-ASMP-v{__version__}-{system}-{arch}"

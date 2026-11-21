@@ -78,7 +78,7 @@ class ApiClient:
             if SECURITY_BLOCK.search(detail):
                 raise SecurityBlocked(f"服务器安全策略拦截：{detail}")
         if response.status_code in (401, 403) or code in ("003", "013") or re.search(r"notLogin|未登录|登录失效|登录过期|重新登录", msg, re.I):
-            raise AuthenticationExpired("登录已失效，请重新通过官方网页登录")
+            raise AuthenticationExpired("登录已失效，请在官网重新登录并粘贴新令牌")
         if not 200 <= response.status_code < 300:
             raise RequestUncertain(f"HTTP {response.status_code}，无法确认请求结果")
         if not isinstance(body, dict) or not isinstance(code, str) or not code:

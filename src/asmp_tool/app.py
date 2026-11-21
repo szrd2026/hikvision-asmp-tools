@@ -6,27 +6,13 @@ import sys
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import QCoreApplication, QElapsedTimer, QLockFile, QTimer, Qt
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtCore import QCoreApplication, QLockFile, QTimer
+from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox
 
 from . import __version__
 from .config import ConfigStore, application_directory, atomic_json, default_data_directory
 from .journal import Journal
 from .models import UserError
-
-LOGIN_FORM_PROBE = """
-(() => {
-    const shown = input => input.getClientRects().length > 0 &&
-        getComputedStyle(input).visibility === 'visible';
-    const inputs = Array.from(document.querySelectorAll('input'));
-    return {
-        url: location.href,
-        hasLoginFields: inputs.some(input => input.type === 'password' && shown(input)) &&
-            inputs.some(input => ['text', 'email', 'tel'].includes(input.type) && shown(input))
-    };
-})()
-"""
-
 
 def acquire_instance_lock(data_dir: Path) -> QLockFile:
     lock = QLockFile(str(data_dir / "app.lock"))
@@ -44,29 +30,24 @@ def main(argv=None) -> int:
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--data-dir", type=Path, help="指定数据目录，默认使用系统用户数据目录")
     parser.add_argument("--legacy-dir", type=Path, help="旧版配置与 CSV 所在目录")
-    parser.add_argument("--login", action="store_true", help="启动后打开官方登录窗口")
     parser.add_argument("--diagnostics", action="store_true", help="仅将认证成功状态写入 diagnostics.json，不写入令牌")
     parser.add_argument("--smoke-test", action="store_true", help="在独立临时目录检查界面启动，不发送业务请求")
-    parser.add_argument("--browser-smoke", action="store_true", help="检查官网能否在 QtWebEngine 载入，不登录、不提交")
     parser.add_argument("--screenshot", type=Path, help="配合 --smoke-test 保存应用界面截图")
     args = parser.parse_args(argv)
-    smoke = args.smoke_test or args.browser_smoke
     if args.screenshot and not args.smoke_test:
         parser.error("--screenshot 仅用于 --smoke-test")
-    QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     QCoreApplication.setOrganizationName("HikvisionASMP")
     QCoreApplication.setApplicationName("HikvisionASMP")
     QCoreApplication.setApplicationVersion(__version__)
     app = QApplication.instance() or QApplication([sys.argv[0]])
     app.setStyle("Fusion")
-    # Import WebEngine before constructing any view, on the GUI's main thread.
     from .ui.window import MainWindow
     data_dir = args.data_dir
-    legacy_dir = args.legacy_dir or (None if smoke else application_directory())
+    legacy_dir = args.legacy_dir or (None if args.smoke_test else application_directory())
     lock = None
     try:
         if data_dir is None:
-            data_dir = Path(tempfile.mkdtemp(prefix="asmp-smoke-")) if smoke else default_data_directory()
+            data_dir = Path(tempfile.mkdtemp(prefix="asmp-smoke-")) if args.smoke_test else default_data_directory()
         data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         lock = acquire_instance_lock(data_dir)
         config = ConfigStore(data_dir, legacy_dir)
@@ -80,7 +61,7 @@ def main(argv=None) -> int:
             window.log(f"已迁移旧 CSV 的 {imported} 行记录，旧文件保持原样。")
     except (UserError, OSError) as error:
         message = str(error) if isinstance(error, UserError) else "无法初始化数据目录，请检查权限或磁盘空间"
-        if smoke:
+        if args.smoke_test:
             print(message, file=sys.stderr)
         else:
             if data_dir is not None:
@@ -92,97 +73,29 @@ def main(argv=None) -> int:
     window.show()
     result = {"exit": 0}
     if args.smoke_test:
-        smoke_objects = []
         def check_window():
             try:
+                if window.token_edit.echoMode() != QLineEdit.EchoMode.Password:
+                    raise RuntimeError("令牌输入框未隐藏")
+                window.token_edit.setText("OFFLINE-SMOKE-TOKEN")
                 config.save(window.settings())
-                if "token" in json.loads(config.path.read_text(encoding="utf-8")):
+                saved = config.path.read_text(encoding="utf-8")
+                if "token" in json.loads(saved) or window.token_edit.text() in saved:
                     raise RuntimeError("令牌意外写入配置")
+                window.token_edit.clear()
                 if args.screenshot:
                     args.screenshot.parent.mkdir(parents=True, exist_ok=True)
                     if not window.grab().save(str(args.screenshot)):
                         raise RuntimeError("截图保存失败")
-                from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
-                from PySide6.QtWebEngineWidgets import QWebEngineView
-                profile = QWebEngineProfile(app)
-                view = QWebEngineView()
-                page = QWebEnginePage(profile, view)
-                view.setPage(page)
-                smoke_objects.extend([profile, view, page])
-                def loaded(ok):
-                    if not ok:
-                        result["exit"] = 1
-                        print("SMOKE_FAILED: offline renderer could not load the test page", file=sys.stderr, flush=True)
-                    else:
-                        atomic_json(data_dir / "smoke-result.json", {"ui": True, "webengine": True, "version": __version__})
-                        print("UI_AND_WEBENGINE_SMOKE_OK", flush=True)
-                    page.deleteLater()
-                    view.deleteLater()
-                    profile.deleteLater()
-                    window.close()
-                view.loadFinished.connect(loaded)
-                page.renderProcessTerminated.connect(
-                    lambda status, code: print(f"RENDERER_TERMINATED: {status.name} ({code})", file=sys.stderr, flush=True))
-                view.setHtml("<!doctype html><title>ASMP offline smoke</title><p>Offline renderer check</p>")
-                return
+                atomic_json(data_dir / "smoke-result.json",
+                            {"ui": True, "manual_token": True, "version": __version__})
+                print("UI_AND_MANUAL_TOKEN_SMOKE_OK", flush=True)
             except Exception as error:
                 result["exit"] = 1
                 print(str(error), file=sys.stderr, flush=True)
-            window.close()
-        QTimer.singleShot(300, check_window)
-        def timed_out():
-            result["exit"] = 1
-            print("SMOKE_FAILED: renderer timeout", file=sys.stderr, flush=True)
-            window.close()
-        QTimer.singleShot(45000, timed_out)
-    elif args.browser_smoke:
-        from .ui.login import official_url
-
-        timer = QTimer(app)
-        clock = QElapsedTimer()
-        clock.start()
-        window.show_login()
-        dialog = window._login_dialog
-        checking = False
-
-        def finish_browser(ok, detail):
-            timer.stop()
-            result["exit"] = 0 if ok else 1
-            print(detail, file=sys.stdout if ok else sys.stderr, flush=True)
-            try:
-                atomic_json(data_dir / "smoke-result.json", {"official_page": ok, "version": __version__})
-            except UserError as error:
-                result["exit"] = 1
-                print(str(error), file=sys.stderr, flush=True)
             finally:
-                if not dialog._disposed:
-                    dialog.reject()
                 window.close()
-
-        def on_form_probe(probe):
-            nonlocal checking
-            checking = False
-            if timer.isActive() and isinstance(probe, dict):
-                url = probe.get("url", "")
-                if official_url(url) and url.startswith("https://asmp.hikvision.com/sr/") and probe.get("hasLoginFields") is True:
-                    finish_browser(True, "BROWSER_SMOKE_OK: verified visible fields on the official ASMP login page")
-
-        def check_browser():
-            nonlocal checking
-            if dialog._disposed:
-                finish_browser(False, "BROWSER_SMOKE_FAILED: the login window was closed")
-            elif dialog.renderer_error:
-                status, code = dialog.renderer_error
-                finish_browser(False, f"BROWSER_SMOKE_FAILED: renderer {status} ({code})")
-            elif clock.elapsed() >= 45000:
-                finish_browser(False, "BROWSER_SMOKE_FAILED: official login form was not visible within 45 seconds")
-            elif dialog.page_loaded and not checking and official_url(dialog.view.url().toString()):
-                checking = True
-                dialog.page.runJavaScript(LOGIN_FORM_PROBE, on_form_probe)
-        timer.timeout.connect(check_browser)
-        timer.start(500)
-    elif args.login:
-        QTimer.singleShot(100, window.show_login)
+        QTimer.singleShot(300, check_window)
     try:
         code = app.exec()
         return result["exit"] or code

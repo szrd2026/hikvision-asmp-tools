@@ -1,11 +1,6 @@
 name: Test and build Python desktop
 on:
   workflow_dispatch:
-    inputs:
-      official_login_smoke:
-        description: Check the live ASMP login form with the Windows package
-        type: boolean
-        default: false
   push:
     branches: [main]
   pull_request:
@@ -55,16 +50,6 @@ jobs:
             dist/Hikvision-ASMP-v*.sha256
             dist/checksums-v*.txt
           if-no-files-found: error
-      - name: Check official ASMP sign-in (Windows)
-        if: runner.os == 'Windows' && inputs.official_login_smoke
-        shell: pwsh
-        run: |
-          $probe = Join-Path $PWD '.tmp/official-login-smoke'
-          $process = Start-Process -FilePath 'build/frozen/HikvisionASMP/HikvisionASMP.exe' -ArgumentList "--browser-smoke --data-dir `"$probe`"" -WindowStyle Hidden -Wait -PassThru
-          Get-Content -LiteralPath (Join-Path $probe 'smoke-console.log')
-          if ($process.ExitCode -ne 0) { exit $process.ExitCode }
-          $result = Get-Content -LiteralPath (Join-Path $probe 'smoke-result.json') | ConvertFrom-Json
-          if (-not $result.official_page) { throw 'The official ASMP login form was not verified' }
       - name: Upload build diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v7.0.2
@@ -73,8 +58,6 @@ jobs:
           path: |
             .tmp/frozen-smoke-*/smoke-console.log
             .tmp/frozen-smoke-*/smoke-result.json
-            .tmp/official-login-smoke/smoke-console.log
-            .tmp/official-login-smoke/smoke-result.json
             build/pyinstaller/HikvisionASMP/warn-HikvisionASMP.txt
           include-hidden-files: true
           if-no-files-found: ignore

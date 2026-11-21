@@ -2,14 +2,14 @@
 
 ## 重构范围
 
-2.0 重写界面、网页登录、HTTP、配置、批量任务和提交记录。2.1 增加返回方式、寄回客户地址、设置自动保存和故障描述历史。每个序列号创建一份登记。旧 Windows 实现归档在 `legacy/powershell/`，新运行包不依赖它。
+2.0 重写界面、网页登录、HTTP、配置、批量任务和提交记录。2.1 增加返回方式、寄回客户地址、设置自动保存和故障描述历史。2.2 增加送修客户历史并改为手动粘贴令牌。每个序列号创建一份登记。旧 Windows 实现归档在 `legacy/powershell/`，新运行包不依赖它。
 
 ## 数据流
 
 ```mermaid
 flowchart LR
-    UI[Qt 主界面] --> Login[QtWebEngine 官方网页]
-    Login -->|会话 Cookie| Memory[内存令牌]
+    UI[Qt 主界面] -->|系统浏览器| Login[ASMP 官网]
+    Login -->|用户手动粘贴令牌| Memory[内存令牌]
     Memory --> Worker[Qt 工作线程]
     UI -->|查询或提交任务| Worker
     Worker -->|认证与产品查询| ASMP[ASMP 接口]
@@ -21,7 +21,7 @@ flowchart LR
     Worker -->|进度与结果信号| UI
 ```
 
-官网页面处理账号和密码；宿主只读取适用于业务接口的 `asmp_sr_token` Cookie。登录 profile 不具备持久存储名称，使用内存缓存和无持久 Cookie。页面顶层导航限于 ASMP 官方 HTTPS 域名，客户端请求限于已知接口路径，不跟随凭据请求的重定向。
+系统浏览器中的官网页面处理账号和密码。用户在应用中手动粘贴自己的 `asmp_sr_token`，应用仅在内存保存令牌。客户端请求限于已知官方 HTTPS 接口路径，不跟随凭据请求的重定向。
 
 ## 请求结果分类
 
@@ -65,6 +65,6 @@ schema 2 在 `attempts` 增加 `fault_text`，另用 `fault_descriptions` 保存
 
 ## 验证与边界
 
-回归测试覆盖核心规则、存储故障、并发保护、迁移和真实 Qt 工作线程驱动的模拟业务。原生包在目标系统检查主窗口及离线 Chromium。Windows 真实登录和设备只读查询已验证，生产维修登记尚未做实单验证。
+回归测试覆盖核心规则、存储故障、并发保护、迁移和真实 Qt 工作线程驱动的模拟业务。原生包在目标系统检查主窗口、令牌输入及本地设置保存。自动化测试使用模拟接口。
 
 CI 负责目标系统构建与离线检查，当前结果见 [Actions](https://github.com/szrd2026/hikvision-asmp-tools/actions/workflows/build.yml)。它不验证用户账号权限或真实后台提交。构建、签名及发行版条件见 [开发文档](development.md)。

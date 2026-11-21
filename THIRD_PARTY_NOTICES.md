@@ -2,7 +2,7 @@
 
 The application source is MIT licensed. Bundled third-party components retain their own licenses.
 
-- Qt for Python / PySide6, Shiboken and Qt libraries: open-source LGPLv3 / GPL alternatives and third-party notices as supplied by the Qt Project. Source: https://code.qt.io/cgit/pyside/pyside-setup.git/ and https://code.qt.io/cgit/qt/ . Qt WebEngine includes Chromium and its third-party components. See https://doc.qt.io/qt-6.12/qtwebengine-licensing.html and the Qt Project's source packages for the full component notices.
+- Qt for Python / PySide6, Shiboken and Qt libraries: open-source LGPLv3 / GPL alternatives and third-party notices as supplied by the Qt Project. Source: https://code.qt.io/cgit/pyside/pyside-setup.git/ and https://code.qt.io/cgit/qt/ .
 - HTTPX, HTTPCore, AnyIO, h11, IDNA and typing_extensions: their upstream licenses are included in `third-party-licenses`.
 - Certifi: Mozilla Public License 2.0, including the CA certificate bundle's notices.
 - PyInstaller bootloader: GPL with the PyInstaller bootloader exception. Application licensing is governed by the application and bundled libraries' own terms.

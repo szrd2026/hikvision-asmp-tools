@@ -45,13 +45,11 @@ Linux 构建及测试依赖见 [工作流](../.github/workflows/build.yml)。无
 ```bash
 python -m pytest -q
 python run.py --smoke-test
-python run.py --browser-smoke
 ```
 
 - 核心测试使用模拟响应，覆盖权限、报文、成功/失效/拒绝、超时、重定向、异常响应、防重、停止、存储故障及旧数据迁移。
 - Qt 界面测试使用真实工作线程驱动模拟业务，检查结果表、控件恢复、关闭和令牌隐藏。
-- `--smoke-test` 在独立临时目录检查界面、配置保存和离线 Chromium 渲染，不发送业务请求。
-- `--browser-smoke` 只加载 ASMP 官方页面，不登录、不登记；依赖网络，未作为 CI 必须步骤。
+- `--smoke-test` 在独立临时目录检查界面、令牌输入隐藏和配置保存，不发送业务请求。
 - Windows 真实登录和设备只读查询已验证。实单提交未做生产验证；CI 的离线启动成功不代表真实业务成功。
 
 显式 smoke 测试可结合 `--data-dir` 指定测试目录。原生包在该目录写入 `smoke-result.json`；窗口模式的启动日志写入 `smoke-console.log`。这些诊断文件不包含令牌。
@@ -75,7 +73,7 @@ python tools/build.py
 
 每个包附独立 `.sha256`。构建目录位于 `build/`，归档位于 `dist/`，均不提交 Git。
 
-Windows 构建为子进程隔离 PATH 和 Qt 路径，避免把其他工具的同名 DLL（例如 ICU）收集进程序；不修改系统环境。macOS 使用 ditto 保留框架符号链接和元数据，并合并 QtWebEngineProcess 所需 entitlements。
+Windows 构建为子进程隔离 PATH 和 Qt 路径，避免把其他工具的同名 DLL（例如 ICU）收集进程序；不修改系统环境。macOS 使用 ditto 保留框架符号链接和元数据。
 
 需要 macOS Developer ID 签名时，使用本机已配置的身份：
 

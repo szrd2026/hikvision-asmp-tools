@@ -9,9 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.2.0] - 2026-11-21
 
-- Recreate the embedded browser page on retry after renderer termination and report the failure separately from network errors.
+- Use manual ASMP session tokens and remove the embedded browser from the application and native packages.
 - Let source and native launches reuse a writable data directory through an explicit path file.
-- Offer an official system-browser link and verify rendered login fields in the live smoke check.
+- Open the official portal in the system browser and verify masked token input and settings persistence in the packaged app.
 - Report ASMP security policy refusals without treating them as expired sessions.
 - Remember up to 50 recent repair customers in a searchable dropdown with persistent deletion.
 - Preserve the selected city and district when the operator reselects the same parent region.

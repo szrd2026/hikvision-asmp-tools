@@ -62,7 +62,17 @@ def window(qapp, tmp_path, settings, account):
 
 def test_auth_worker_updates_ui_and_only_boolean_diagnostics(window, qapp):
     view, calls = window
-    view.check_button.click()
+    view.token_edit.clear()
+    view.token_edit.setFocus()
+    clipboard = qapp.clipboard()
+    previous = clipboard.text()
+    try:
+        clipboard.setText("UI-SECRET-TOKEN")
+        view.token_edit.paste()
+    finally:
+        clipboard.setText(previous)
+    assert view.token_edit.text() == "UI-SECRET-TOKEN"
+    QTest.keyClick(view.token_edit, Qt.Key.Key_Return)
     wait_done(view, qapp)
     assert view.auth_status.text() == "登录有效"
     assert view.fault_combo.count() == 2
@@ -70,6 +80,12 @@ def test_auth_worker_updates_ui_and_only_boolean_diagnostics(window, qapp):
     diag = json.loads((view.config_store.directory / "diagnostics.json").read_text())
     assert diag == {"authenticated": True}
     assert len(calls) == 2
+    view.serial_edit.setPlainText("TEST001")
+    view.query_button.click()
+    wait_done(view, qapp)
+    assert view.last_summary.queried == 1 and not view.journal.records()
+    assert "UI-SECRET-TOKEN" not in view.config_store.path.read_text(encoding="utf-8")
+    assert "UI-SECRET-TOKEN" not in view.log_path.read_text(encoding="utf-8")
 
 
 def test_logout_during_fault_option_load_invalidates_login(window, qapp, monkeypatch):
